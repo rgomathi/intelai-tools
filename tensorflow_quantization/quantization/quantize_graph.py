@@ -48,9 +48,11 @@ from tensorflow.python.platform import app
 from tensorflow.python.platform import flags as flags_lib
 from tensorflow.python.platform import gfile
 from google.protobuf import text_format
+from nodes_editor  import  get_nodes_control_pannel 
 
 flags = flags_lib
 FLAGS = flags.FLAGS
+flags.DEFINE_string("fc_cfg", "", """fc_cfg.""")
 
 flags.DEFINE_string("input", "", """Path to the input graph.""")
 flags.DEFINE_string("output", "", """Path to the output graph.""")
@@ -582,6 +584,119 @@ class GraphRewriter(object):
                 raise ValueError("Duplicate node names detected.")
         return nodes_map
 
+    def get_node_name_list(self):
+        return self.nodes_map.keys()
+    
+    def get_node_byname(self, node_name):
+        return self.nodes_map[node_name]
+    
+    def get_node_input_list(self, node_name):
+        input_l = []
+        node = self.get_node_byname(node_name)
+        for i in  node.input:
+            input_l.append(i)
+        return input_l
+    
+    def get_output_node_name_list(self, node_name):
+        output_node_name_l = []
+        for n in self.get_node_name_list():
+            node = self.get_node_byname(n)
+            if node_name in node.input:
+               output_node_name_l.append(node.name)
+        return output_node_name_l
+    
+    def insert_after(self, current_node):
+        print("insert_after")
+        self.go_through_all_node()
+        print(current_node)
+
+    def rewrite_nodes(self, model_fc_cfg_name, mode):
+        node_name_l = self.get_node_name_list()
+        _node_control_pannel = get_nodes_control_pannel(self, model_fc_cfg_name, mode)
+        print(_node_control_pannel)
+        if _node_control_pannel is None:
+            return
+        to_be_removed = _node_control_pannel["to_be_removed"]
+        to_be_added = _node_control_pannel["to_be_added"]
+        to_be_updated = _node_control_pannel["to_be_updated"].keys()
+        data_folder = _node_control_pannel["Settings"]['Data_Folder']
+        name_extra =  _node_control_pannel["name_extra"]
+        name_extra_connection =  _node_control_pannel["name_extra_connection"]
+        def get_name_extra(s_name):
+            to_update = True
+            if "extra_name" in to_add_node.keys():
+                to_update = to_add_node["extra_name"]
+            if to_update is False:
+                return s_name             
+            return (name_extra + name_extra_connection + s_name)
+        def update_input_name_with_extra(input_l, to_add_node):
+            to_update = True
+            if "input_name_extra" in to_add_node.keys():
+                to_update = to_add_node["input_name_extra"]
+            if to_update is False:
+                return input_l
+            new_input_l = []
+            for input_node_name in input_l:
+                n_name = get_name_extra(input_node_name)
+                new_input_l.append(n_name)
+            return new_input_l
+        for to_add_node in to_be_added:
+            #print("===>", to_add_node)
+
+            if to_add_node["op"] not in "Const":
+                input_l = update_input_name_with_extra(to_add_node["input"], to_add_node)
+                node_name_with_extra =  get_name_extra(to_add_node["name"])
+                print(node_name_with_extra)
+                print(to_add_node["op"])
+                print(input_l)
+                new_node = create_node(to_add_node["op"], node_name_with_extra, input_l)  
+                if to_add_node["attr"] is not None:
+                    for attr in to_add_node["attr"].keys():
+                        if "dtype" in to_add_node["attr"][attr]["type"]:
+                            set_attr_dtype(new_node, attr, to_add_node["attr"][attr]["v"])
+                        elif "bool" in to_add_node["attr"][attr]["type"]:
+                            set_attr_bool(new_node, attr, to_add_node["attr"][attr]["v"])
+                        elif "string" in to_add_node["attr"][attr]["type"]:
+                            set_attr_string(new_node, attr,to_add_node["attr"][attr]["v"])
+                        elif "float" in to_add_node["attr"][attr]["type"]:
+                            set_attr_float(new_node, attr,to_add_node["attr"][attr]["v"])
+                        elif "int" in to_add_node["attr"][attr]["type"]:
+                            set_attr_int(new_node, attr,to_add_node["attr"][attr]["v"])
+                            
+                self.add_output_graph_node(new_node)
+            else:
+                #print("===>", to_add_node)
+                shape = to_add_node["shape"]
+                shape = None 
+                if to_add_node["value_file"] is not None:
+                    c_fn=data_folder + to_add_node["value_file"]
+                    cv = np.load(c_fn)
+                    if shape == 1:
+                        cv = cv[0]
+                        shape = None 
+                else:
+                    if "shape_c" in to_add_node.keys() and to_add_node["shape_c"] == 1:
+                        cv = to_add_node["const_v"]
+                        shape = None 
+                    else:
+                        if "all_same_value" in to_add_node.keys():
+                            cv_ones=np.ones(to_add_node["shape_c"])
+                            cv=to_add_node["all_same_value"] * cv_ones
+                            if "flat" in to_add_node.keys():
+                                if to_add_node["flat"]:
+                                    cv=cv.reshape(-1)
+                        else:
+                            cv=to_add_node["const_v"]
+                node_name_with_extra =   get_name_extra(to_add_node["name"])
+                new_node = create_constant_node(node_name_with_extra,cv,to_add_node["type"], shape)
+                self.add_output_graph_node(new_node)
+        for node_name in  node_name_l:      
+            if node_name not in to_be_removed and node_name not in to_be_updated:
+                current_node = self.get_node_byname(node_name)
+                new_node = node_def_pb2.NodeDef()
+                new_node.CopyFrom(current_node)
+                self.add_output_graph_node(new_node)
+
     def rewrite(self, output_node_names):
         """Triggers rewriting of the float graph.
 
@@ -597,7 +712,11 @@ class GraphRewriter(object):
             self.nodes_map[output_node_name]
             for output_node_name in output_node_names
         ]
-        if self.mode == "round":
+        if self.mode == "mm_per_channel":
+            self.already_visited = {}
+            if FLAGS.fc_cfg is not "":
+                self.rewrite_nodes(FLAGS.fc_cfg, self.mode)
+        elif self.mode == "round":
             self.already_visited = {}
             for output_node in output_nodes:
                 self.round_nodes_recursively(output_node)
@@ -1130,7 +1249,9 @@ class GraphRewriter(object):
                 "FasterRCNN", "R-FCN", "wide_deep_large_ds"] and not ('map/while' in current_node.name)
 
         # TODO(intel-tf): Clean up model-specific code
-        if current_node.op == "MatMul" and FLAGS.model_name in ["wide_deep_large_ds"]:
+        if current_node.op == "MatMul" and FLAGS.model_name in ["wide_deep_large_ds"] \
+                and (current_node.op not in self.excluded_ops) \
+                and (current_node.name not in self.excluded_nodes):
             should_quantize_matmul = True
         for i, input_node_name in enumerate(current_node.input):
             input_node_name = node_name_from_input(input_node_name)
@@ -2089,7 +2210,7 @@ def main(unused_args):
         return -1
 
     known_modes = [
-        "round", "quantize", "eightbit", "weights", "test", "weights_rounded"
+        "round", "quantize", "eightbit", "weights", "test", "weights_rounded", "mm_per_channel"
     ]
     if not any(FLAGS.mode in s for s in known_modes):
         print("mode is '" + FLAGS.mode + "', not in " + ", ".join(known_modes) +
