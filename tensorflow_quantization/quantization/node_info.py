@@ -14,6 +14,7 @@ def get_nodes_control_pannel_pc(gr, fc_cfg):
                                     "w": None,
                                     "w_min": None,
                                     "w_max": None,
+                                    "bias_float": None,
                                 }
 
     _node_infor = {
@@ -122,10 +123,11 @@ def get_nodes_control_pannel_pc(gr, fc_cfg):
                                                 #"const_v": 0.0,
                                                 "value_file":None
                                                 } , 
-                                   "Relu":{ "name": fc_cfg["fc_output_node_name"],
+                                "Relu":{ "name": fc_cfg["fc_output_node_name"],
                                             "extra_name": False,
                                             "input_name_extra": False,
                                             "op": "Relu",
+                                            #"input": [fc_cfg["name_extra"] + fc_cfg["name_extra_connection"] +"bias_add"],
                                             "input": [fc_cfg["name_extra"] + fc_cfg["name_extra_connection"] +"QuantizedMatMulWithBiasandRelu_perChannel"],
                                             "attr": {
                                                         "T":{"type":"dtype", "v":dtypes.float32}
@@ -149,6 +151,8 @@ def get_nodes_control_pannel_pc(gr, fc_cfg):
                                         _node_infor["const_w_max"],
                                         _node_infor["const_bz_qint32"], 
                                         _node_infor[ "Relu"],
+                                       # _node_infor[ "const_bias"],
+                                       # _node_infor[ "bias_add"],
 
                                         ],
                     "to_be_updated":{
@@ -165,7 +169,25 @@ def get_nodes_control_pannel_pc(gr, fc_cfg):
         #_node_control_pannel[ "to_be_added"].remove(_node_infor[ "Mul_a_vmin"])
         #_node_control_pannel[ "to_be_added"].remove(_node_infor[ "Add_a_c"])
         #_node_control_pannel[ "to_be_added"].remove(_node_infor[ "const_a"])
-        
+    '''
+        "const_bias":{ "name": "const_bias",
+                          "op": "Const",
+                                                "attr": None,
+                                                "type": dtypes.float32,
+                                                "shape": None,
+                                                "shape_c": 0,     
+                                                "const_v": all_const["bias_float"],
+                                                "value_file":None
+                                                },      
+
+                                "bias_add":{ "name": "bias_add",
+                                            "op": "BiasAdd",
+                                            "input": [fc_cfg["name_extra"] + fc_cfg["name_extra_connection"] +"QuantizedMatMulWithBiasandRelu_perChannel", "const_bias"],
+                                            "attr": {
+                                                        "T":{"type":"dtype", "v":dtypes.float32}
+                                                }                                         
+                                            },
+    '''
     return _node_control_pannel
 
 

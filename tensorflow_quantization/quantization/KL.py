@@ -249,7 +249,7 @@ def get_symmetric_threshold(H_orig,NUM_QBINS,max_val,min_val,HE,HE_orig):
     res_edges=[]
     print(len(HE))
     #print("Hist :", H)
-    for i in range(NUM_QBINS/2,num_Pbins):
+    for i in range(NUM_QBINS//2,num_Pbins):
 #    if True:
  #       i = 128
         #print("Hist :", H)
@@ -288,13 +288,22 @@ def get_symmetric_threshold(H_orig,NUM_QBINS,max_val,min_val,HE,HE_orig):
         #print('Error :', entropy(ref_distribution_P,Q))
   #      print(res)
     #res[0] = 1
-    print(res)
+    #print(res)
+    if (len(res)==0):
+        if (len(H[zero_bin:]) < NUM_QBINS/2):
+            idx = len(HE) - 1            
+            return(HE_orig[zero_bin+idx], HE_orig[zero_bin-idx], idx)
+        else:
+            idx = zero_bin
+            return(HE_orig[zero_bin+idx], HE_orig[zero_bin-idx], idx)
+          
+
     min_kl=np.nanmin(res)
     idx=np.argmin(res)
     thresh_HE = res_edges[idx]
     print('Actal edge at idx :', thresh_HE)
-    print('Actual pos-edge at idx from full HE :', HE_orig[zero_bin+NUM_QBINS/2-1+idx])
-    print('Actual neg-edge at idx from full HE :', HE_orig[zero_bin-NUM_QBINS/2-idx])
+    print('Actual pos-edge at idx from full HE :', HE_orig[zero_bin+NUM_QBINS//2-1+idx])
+    print('Actual neg-edge at idx from full HE :', HE_orig[zero_bin-NUM_QBINS//2-idx])
     print("Min is {} at index {}".format(min_kl,idx))
 
     min_thresh=((idx-0.5)*min_val)/num_Pbins
@@ -302,7 +311,7 @@ def get_symmetric_threshold(H_orig,NUM_QBINS,max_val,min_val,HE,HE_orig):
     print(max_thresh)
     print(min_thresh)
     #return(max_thresh,min_thresh,idx)
-    return(HE_orig[zero_bin+NUM_QBINS/2-1+idx], HE_orig[zero_bin-NUM_QBINS/2-idx], idx)
+    return(HE_orig[zero_bin+NUM_QBINS//2-1+idx], HE_orig[zero_bin-NUM_QBINS//2-idx], idx)
     
 
 
