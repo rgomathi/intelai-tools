@@ -644,6 +644,7 @@ class GraphRewriter(object):
             #print("===>", to_add_node)
 
             if to_add_node["op"] not in "Const":
+                print('########### In Ops ###################')
                 input_l = update_input_name_with_extra(to_add_node["input"], to_add_node)
                 node_name_with_extra =  get_name_extra(to_add_node["name"])
                 print(node_name_with_extra)
@@ -665,9 +666,11 @@ class GraphRewriter(object):
                             
                 self.add_output_graph_node(new_node)
             else:
-                #print("===>", to_add_node)
+                print("===>", to_add_node)
+                print('########### In const node #######################')
                 shape = to_add_node["shape"]
                 shape = None 
+                '''
                 if to_add_node["value_file"] is not None:
                     c_fn=data_folder + to_add_node["value_file"]
                     cv = np.load(c_fn)
@@ -675,18 +678,19 @@ class GraphRewriter(object):
                         cv = cv[0]
                         shape = None 
                 else:
-                    if "shape_c" in to_add_node.keys() and to_add_node["shape_c"] == 1:
-                        cv = to_add_node["const_v"]
-                        shape = None 
+                '''
+                if "shape_c" in to_add_node.keys() and to_add_node["shape_c"] == 1:
+                    cv = to_add_node["const_v"]
+                    shape = None 
+                else:
+                    if "all_same_value" in to_add_node.keys():
+                        cv_ones=np.ones(to_add_node["shape_c"])
+                        cv=to_add_node["all_same_value"] * cv_ones
+                        if "flat" in to_add_node.keys():
+                            if to_add_node["flat"]:
+                                cv=cv.reshape(-1)
                     else:
-                        if "all_same_value" in to_add_node.keys():
-                            cv_ones=np.ones(to_add_node["shape_c"])
-                            cv=to_add_node["all_same_value"] * cv_ones
-                            if "flat" in to_add_node.keys():
-                                if to_add_node["flat"]:
-                                    cv=cv.reshape(-1)
-                        else:
-                            cv=to_add_node["const_v"]
+                        cv=to_add_node["const_v"]
                 node_name_with_extra =   get_name_extra(to_add_node["name"])
                 new_node = create_constant_node(node_name_with_extra,cv,to_add_node["type"], shape)
                 self.add_output_graph_node(new_node)
@@ -712,7 +716,7 @@ class GraphRewriter(object):
             self.nodes_map[output_node_name]
             for output_node_name in output_node_names
         ]
-        if self.mode == "mm_per_channel":
+        if self.mode == "mm_split_fuse":
             self.already_visited = {}
             if FLAGS.fc_cfg is not "":
                 self.rewrite_nodes(FLAGS.fc_cfg, self.mode)
@@ -2210,7 +2214,7 @@ def main(unused_args):
         return -1
 
     known_modes = [
-        "round", "quantize", "eightbit", "weights", "test", "weights_rounded", "mm_per_channel"
+        "round", "quantize", "eightbit", "weights", "test", "weights_rounded", "mm_split_fuse"
     ]
     if not any(FLAGS.mode in s for s in known_modes):
         print("mode is '" + FLAGS.mode + "', not in " + ", ".join(known_modes) +

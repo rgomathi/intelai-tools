@@ -19,11 +19,11 @@ from tensorflow.python.platform import flags as flags_lib
 from tensorflow.python.platform import gfile
 from google.protobuf import text_format
 
-from node_info  import  get_nodes_control_pannel_pc
+from node_info  import  get_nodes_control_pannel
 from fc_cfg import fc_cfg_setting
 
 __func_categary = {
-         "matmul_pc": get_nodes_control_pannel_pc,
+         "split_fuse_matmul": get_nodes_control_pannel,
 #         "2b_qint8_matmul": get_nodes_control_pannel_2b_qint8,
 #         "weight_expand": get_nodes_control_pannel_weight_expand,
 #         "we_qint8_matmul": get_node_info_we_qint8_matmul,
