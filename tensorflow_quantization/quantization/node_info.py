@@ -144,11 +144,29 @@ def get_nodes_control_pannel(gr, fc_cfg):
                                 "shape" : None,
                                 "const_v"   :   all_const["w_for_int8"]
                             },
+                            "bias_add_dummy":
+                            {
+                                "name"  : "bias_add_dummy",
+                                "op"    : "BiasAdd",
+                                "input" : ["matmul_int8", "const_wt_comp"],
+                                "attr"  :   {
+                                            "T":{"type":"dtype", "v":dtypes.float32}
+                                            }
+                            },
+                            "const_wt_comp":
+                            {
+                                "name"  : "const_wt_comp",
+                                "op"    : "Const",
+                                #"type"  : dtypes.qint32,
+                                "type"  : dtypes.float32,
+                                "shape" : None,
+                                "const_v"   :   all_const["w_comp"]
+                            },
                             "addn":
                             {
                                 "name"  : "addn",
                                 "op"    : "AddN",
-                                "input" : ["matmul_fp32", "matmul_int8"],
+                                "input" : ["matmul_fp32", "bias_add_dummy"],
                                 "attr"  :   {
                                             "N":{"type":"int", "v":2},
                                             "T":{"type":"dtype", "v":dtypes.float32}
@@ -202,6 +220,8 @@ def get_nodes_control_pannel(gr, fc_cfg):
                                    _node_infor["const_wt_fp32"], 
                                    _node_infor["matmul_int8"],        
                                    _node_infor["const_wt_int8"],
+                                   _node_infor["bias_add_dummy"],
+                                   _node_infor["const_wt_comp"],                                   
                                    _node_infor["addn"],
                                    _node_infor["bias_add"],
                                    _node_infor["const_bias"],

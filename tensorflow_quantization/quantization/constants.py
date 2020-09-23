@@ -107,6 +107,7 @@ u           int32_bias.append(
     all_const["b"] = bias_float_tensor
     all_const["wt_for_fp32"] = fp32_mm_wei
     all_const["wt_for_int8"] = int8_mm_wei
+    all_const["wt_comp"] = np.zeros((bias_float_tensor.shape))
 
     #all_const["w_min"] = min_list #min_value
     #all_const["w_max"] = max_list #max_value
@@ -115,6 +116,7 @@ u           int32_bias.append(
     _node_infor["const_bias"]["const_v"] = bias_float_tensor
     _node_infor["const_wt_fp32"]["const_v"] = fp32_mm_wei
     _node_infor["const_wt_int8"]["const_v"] = int8_mm_wei
+    _node_infor["const_wt_comp"]["const_v"] = np.zeros((bias_float_tensor.shape))
     #_node_infor["const_w_min"]["const_v"] = min_list #min_value
     #_node_infor["const_w_max"]["const_v"] = max_list #max_value
     #_node_infor["const_bz_qint32"]["const_v"] = qint32_bias
