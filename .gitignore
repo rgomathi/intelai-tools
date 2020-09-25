@@ -1,3 +1,6 @@
+*.npy
+*.pb
+*.patch
 .tox/
 test_data/
 __pycache__/

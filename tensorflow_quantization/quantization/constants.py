@@ -2,8 +2,17 @@ from tensorflow.python.framework import tensor_util
 import numpy as np
 from tensorflow.python.framework import dtypes
 import tensorflow as tf
+
             
 def generate_const(gr, all_const, _node_infor, a_min, a_max ):
+
+    act = np.load('activations.npy')
+    print(act.shape)
+    a_min = np.min(act)
+    a_max = np.max(act)
+    a_min = -1.64317
+    a_max = 4.51301
+
     matmul_weight_name = all_const["weight_node_name"]
     bias_name= all_const["bias_node_name"]
     weight_input_node = gr.get_node_byname(matmul_weight_name)
@@ -16,12 +25,21 @@ def generate_const(gr, all_const, _node_infor, a_min, a_max ):
     #fp32_mm_wei = tf.concat([weight_float_tensor[0:457,:], weight_float_tensor[457+256+256:457+256+256+499, :]],0)
     #int8_mm_wei = tf.concat([weight_float_tensor[457:457+256, :],weight_float_tensor[457+256:457+256+256, :], weight_float_tensor[457+256+256+499:, :]], 0)
 
-    fp32_mm_wei = np.concatenate([weight_float_tensor[0:457,:], weight_float_tensor[457+256+256:457+256+256+499, :]],0)
-    int8_mm_wei = np.concatenate([weight_float_tensor[457:457+256, :],weight_float_tensor[457+256:457+256+256, :], weight_float_tensor[457+256+256+499:, :]], 0)
-    print('weight_float_tensor :', weight_float_tensor)
-    print('weight_float_tensor shape:', weight_float_tensor.shape)
-    print('fp32_mm_wei :', fp32_mm_wei)
-    print('fp32_mm_wei shape :', fp32_mm_wei.shape)
+    # fp32_mm_wei = np.concatenate([weight_float_tensor[0:457,:], weight_float_tensor[457+256+256:457+256+256+499, :]],0)
+    # int8_mm_wei = np.concatenate([weight_float_tensor[457:457+256, :],weight_float_tensor[457+256:457+256+256, :], weight_float_tensor[457+256+256+499:, :]], 0)
+    
+    abs_max = np.max(np.abs(weight_float_tensor))
+    weight_qint8_tensor = (np.around(weight_float_tensor*127/abs_max)).astype(np.int8)
+    w_min = np.min(weight_float_tensor)
+    w_max = np.max(weight_float_tensor)
+    print('abs_max :', abs_max)
+    print('weight_qint8_tensor :', weight_qint8_tensor)
+    print('weight_qint8_tensor shape :', weight_qint8_tensor.shape)
+    print('w_min :', w_min)
+    print('w_max :', w_max)
+    print('a_min :', a_min)
+    print('a_max :', a_max)
+    print('bias_float_tensor.shape :', bias_float_tensor.shape)
 
     '''
     ##### weight per channel quantization ############
@@ -62,7 +80,7 @@ def generate_const(gr, all_const, _node_infor, a_min, a_max ):
     #print(ranges)
     #print(min_list)
     #print(max_list)
-
+    '''
 
 
 
@@ -72,16 +90,16 @@ def generate_const(gr, all_const, _node_infor, a_min, a_max ):
 
     int32_bias = []
 
-    bias_scale = 255.0 * 127.0 / ((a_max - a_min) * ranges)
+    bias_scale = 255.0 * 127.0 / ((a_max - a_min) * abs_max)
     ws8_1 = np.sum(np.array(weight_qint8_tensor, dtype=np.int32),axis=0,dtype=np.int32)
     qint32_bias = np.around((bias_float_tensor * bias_scale) + (ws8_1*QaAmin))
-    #qint32_bias = np.around((ws8_1*QaAmin))
+    #qint32_bias = np.around(bias_float_tensor * bias_scale)
 
 
     #print(bias_scale)
     #print(ws8_1)
     print(qint32_bias)
-    '''
+    
     '''
     for bias_index, value in enumerate(
             np.sum(np.array(weight_qint8_tensor, dtype=np.int32),
@@ -104,21 +122,27 @@ u           int32_bias.append(
 
     ##### update all_const #####
     #all_const["input_shape"] = input_shape    
-    all_const["b"] = bias_float_tensor
-    all_const["wt_for_fp32"] = fp32_mm_wei
-    all_const["wt_for_int8"] = int8_mm_wei
-    all_const["wt_comp"] = np.zeros((bias_float_tensor.shape))
-
-    #all_const["w_min"] = min_list #min_value
-    #all_const["w_max"] = max_list #max_value
-    #all_const["bias_float"] = bias_float_tensor #max_value
+    #all_const["b"] = bias_float_tensor
+    all_const["a_min"] = a_min
+    all_const["a_max"] = a_max
+    #all_const["wt_for_fp32"] = fp32_mm_wei
+    #all_const["wt_for_int8"] = int8_mm_wei
+    all_const["wt_for_int8"] = weight_qint8_tensor
+    all_const["w_min"] = w_min
+    all_const["w_max"] = w_max
+    all_const["b_comp"] = qint32_bias
     
-    _node_infor["const_bias"]["const_v"] = bias_float_tensor
-    _node_infor["const_wt_fp32"]["const_v"] = fp32_mm_wei
-    _node_infor["const_wt_int8"]["const_v"] = int8_mm_wei
-    _node_infor["const_wt_comp"]["const_v"] = np.zeros((bias_float_tensor.shape))
-    #_node_infor["const_w_min"]["const_v"] = min_list #min_value
-    #_node_infor["const_w_max"]["const_v"] = max_list #max_value
+    _node_infor["const_a_min"]["const_v"] = a_min
+    _node_infor["const_a_max"]["const_v"] = a_max
+    #_node_infor["const_bias"]["const_v"] = bias_float_tensor
+    #_node_infor["const_wt_fp32"]["const_v"] = fp32_mm_wei
+    #_node_infor["const_wt_int8"]["const_v"] = int8_mm_wei
+    _node_infor["const_wt_int8"]["const_v"] = weight_qint8_tensor
+    _node_infor["const_wt_min"]["const_v"] = w_min
+    _node_infor["const_wt_max"]["const_v"] = w_max
+    _node_infor["const_b_comp"]["const_v"] = qint32_bias#np.zeros((bias_float_tensor.shape))
+
+
     #_node_infor["const_bz_qint32"]["const_v"] = qint32_bias
     #_node_infor["const_bias"]["const_v"] = bias_float_tensor
 

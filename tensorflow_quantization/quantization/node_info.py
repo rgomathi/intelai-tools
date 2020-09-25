@@ -11,127 +11,77 @@ def get_nodes_control_pannel(gr, fc_cfg):
                                     "w_for_fp32": None,
                                     "w_for_int8": None,
                                     "w_comp": None,
-                                    #"w_max": None,
+                                    "w_min" : None,
+                                    "w_max" : None,
+                                    "a_min" : None,
+                                    "a_max" : None,
+                                    "b_comp": None
                                     #"bias_float": None,
                                 }
 
     _node_infor = {
-                            "split":
+                           
+                            "quantize_v2":
                             {
-                                "name"  :   "split",
-                                "op"    :   "SplitV",
+                                "name"  :   "quantize_v2",
+                                "op"    :   "QuantizeV2",
                                 "input_name_extra"  : False,
                                 "input" :  [
                                             fc_cfg["input_node_name"],
-                                            "const_size_splits",
-                                            "const_split_dim"
+                                            "const_a_min",
+                                            "const_a_max",
                                            ], 
                                 "attr"  :   {
-                                            "T":{"type":"dtype", "v":dtypes.float32},
-                                            "Tlen":{"type":"dtype", "v":dtypes.int32},
-                                            "num_split":{"type":"int", "v":5}
+                                            "T":{"type":"dtype", "v":dtypes.quint8},
+                                            "mode":{"type":"string", "v":b"MIN_FIRST"},
+                                            #"T":{"type":"dtype", "v":dtypes.qint8},
+                                            #"mode":{"type":"string", "v":b"SCALED"},
+                                            "round_mode":{"type":"string", "v":b"HALF_AWAY_FROM_ZERO"},
                                             }
                             },
-                            "const_size_splits":
+                            "const_a_min":
                             {
-                                "name"  : "const_size_splits",
-                                "op"    : "Const",
-                                "type"  : dtypes.int32,
-                                "shape" : None,
-                                "const_v"   :   [457, 256,256, 499, 128]
-                            },
-                            "const_split_dim":
-                            {
-                                "name"  : "const_split_dim",
-                                "op"    : "Const",
-                                "type"  : dtypes.int32,
-                                "shape" : None,
-                                "const_v"   :   1
-                            },
-                            "concat_1":
-                            {
-                                "name"  :   "concat_1",
-                                "op"    :   "ConcatV2",
-                                "input_name_extra"  : False,
-                                "input" :  [
-                                            "split",
-                                            "split:3",
-                                            "const_concat1_axis"
-                                           ], 
-                                "attr"  :   {
-                                            "N":{"type":"int", "v":2},
-                                            "T":{"type":"dtype", "v":dtypes.float32},
-                                            "Tidx":{"type":"dtype", "v":dtypes.int32}
-                                            }
-
-                            },
-                            "const_concat1_axis":
-                            {
-                                "name"  : "const_concat1_axis",
-                                "op"    : "Const",
-                                "type"  : dtypes.int32,
-                                "shape" : None,
-                                "const_v"   :   1
-                            },
-                            "concat_2":
-                            {
-                                "name"  :   "concat_2",
-                                "op"    :   "ConcatV2",
-                                "input_name_extra"  : False,
-                                "input" :  [
-                                            "split:1",
-                                            "split:2",
-                                            "split:4",
-                                            "const_concat2_axis"
-                                           ], 
-                                "attr"  :   {
-                                            "N":{"type":"int", "v":3},
-                                            "T":{"type":"dtype", "v":dtypes.float32},
-                                            "Tidx":{"type":"dtype", "v":dtypes.int32}
-                                            }
-                            },
-                            "const_concat2_axis":
-                            {
-                                "name"  : "const_concat2_axis",
-                                "op"    : "Const",
-                                "shape" : None,
-                                "type"  : dtypes.int32,
-                                "const_v"   :   1
-                            },
-                            "matmul_fp32":
-                            {
-                                "name"  :   "matmul_fp32",
-                                "op"    :   "MatMul",
-                                "input_name_extra"  : False,
-                                "input" :  [
-                                            "concat_1",
-                                            "const_wt_fp32",
-                                           ], 
-                                "attr"  :   {
-                                            "T":{"type":"dtype", "v":dtypes.float32},
-                                            "transpose_a":{"type":"bool", "v":False},
-                                            "transpose_b":{"type":"bool", "v":False}
-                                            }
-                            },
-                            "const_wt_fp32":
-                            {
-                                "name"  : "const_wt_fp32",
+                                "name"  : "const_a_min",
                                 "op"    : "Const",
                                 "type"  : dtypes.float32,
                                 "shape" : None,
-                                "const_v"   :   all_const["w_for_fp32"]
+                                "const_v"   :   all_const["a_min"]
                             },
-                            "matmul_int8":
+                            "const_a_max":
                             {
-                                "name"  :   "matmul_int8",
-                                "op"    :   "MatMul",
+                                "name"  : "const_a_max",
+                                "op"    : "Const",
+                                "type"  : dtypes.float32,
+                                "shape" : None,
+                                "const_v"   :   all_const["a_max"]
+                            },
+                            "quantized_mm_b_r_deq":
+                            {
+                                #"name"  :   "quantized_mm_b_r_deq",
+                                "name"  :   fc_cfg["fc_output_node_name"],
+                                "op"    :   "QuantizedMatMulWithBiasAndReluAndDequantize",
                                 "input_name_extra"  : False,
                                 "input" :  [
-                                            "concat_2",
+                                            "quantize_v2",
                                             "const_wt_int8",
+                                            "const_b_comp",
+                                            "quantize_v2:1",
+                                            "quantize_v2:2",
+                                            "const_wt_min",
+                                            "const_wt_max",
+                                            #"const_min_freezed_output",
+                                            #"const_max_freezed_output"
                                            ], 
                                 "attr"  :   {
-                                            "T":{"type":"dtype", "v":dtypes.float32},
+                                            "T1":{"type":"dtype", "v":dtypes.quint8},
+                                            #"T1":{"type":"dtype", "v":dtypes.qint8},
+                                            "T2":{"type":"dtype", "v":dtypes.qint8},
+                                            "Tbias":{"type":"dtype", "v":dtypes.qint32},
+                                            #"Tbias":{"type":"dtype", "v":dtypes.float32},
+                                            "Toutput":{"type":"dtype", "v":dtypes.float32},
+                                            #"Toutput":{"type":"dtype", "v":dtypes.qint32},
+                                            "input_quant_mode":{"type":"string", "v":b"MIN_FIRST"},
+                                            #"input_quant_mode":{"type":"string", "v":b"SCALED"},
                                             "transpose_a":{"type":"bool", "v":False},
                                             "transpose_b":{"type":"bool", "v":False}
                                             }
@@ -140,65 +90,134 @@ def get_nodes_control_pannel(gr, fc_cfg):
                             {
                                 "name"  : "const_wt_int8",
                                 "op"    : "Const",
-                                "type"  : dtypes.float32,
+                                "type"  : dtypes.qint8,
                                 "shape" : None,
                                 "const_v"   :   all_const["w_for_int8"]
                             },
-                            "bias_add_dummy":
+                            "const_b_comp":
                             {
-                                "name"  : "bias_add_dummy",
-                                "op"    : "BiasAdd",
-                                "input" : ["matmul_int8", "const_wt_comp"],
-                                "attr"  :   {
-                                            "T":{"type":"dtype", "v":dtypes.float32}
-                                            }
-                            },
-                            "const_wt_comp":
-                            {
-                                "name"  : "const_wt_comp",
+                                "name"  : "const_b_comp",
                                 "op"    : "Const",
-                                #"type"  : dtypes.qint32,
-                                "type"  : dtypes.float32,
+                                "type"  : dtypes.qint32,
+                                #"type"  : dtypes.float32,
                                 "shape" : None,
-                                "const_v"   :   all_const["w_comp"]
+                                "const_v"   :   all_const["b_comp"]
                             },
-                            "addn":
+                            "const_wt_min":
                             {
-                                "name"  : "addn",
-                                "op"    : "AddN",
-                                "input" : ["matmul_fp32", "bias_add_dummy"],
-                                "attr"  :   {
-                                            "N":{"type":"int", "v":2},
-                                            "T":{"type":"dtype", "v":dtypes.float32}
-                                            }
-                            },
-                            "bias_add":
-                            {
-                                "name"  : "bias_add",
-                                "op"    : "BiasAdd",
-                                "input" : ["addn", "const_bias"],
-                                "attr"  :   {
-                                            "T":{"type":"dtype", "v":dtypes.float32}
-                                            }
-                            },
-                            "const_bias":
-                            {
-                                "name"  : "const_bias",
+                                "name"  : "const_wt_min",
                                 "op"    : "Const",
                                 "type"  : dtypes.float32,
                                 "shape" : None,
-                                "const_v"   :   all_const["b"]
+                                "const_v"   :   all_const["w_min"]
                             },
-                            "relu":
+                            "const_wt_max":
                             {
-                                "name"  : fc_cfg["fc_output_node_name"],
-                                "op"    : "Relu",
-                                "input" : ["bias_add"],
-                                "attr"  :   {
-                                            "T":{"type":"dtype", "v":dtypes.float32}
-                                            }
+                                "name"  : "const_wt_max",
+                                "op"    : "Const",
+                                "type"  : dtypes.float32,
+                                "shape" : None,
+                                "const_v"   :   all_const["w_max"]
+                            },
+                            #"relu":
+                            #{
+                            #    "name"  : fc_cfg["fc_output_node_name"],
+                            #    "op"    : "Relu",
+                            #    "input" : ["quantized_mm_b_r_deq"],
+                            #    "attr"  :   {
+                            #                "T":{"type":"dtype", "v":dtypes.float32}
+                            #                }
                                 
-                            }
+                            # }
+                            # "requantization_range":
+                            # {
+                            #     "name"  :   "requantization_range",
+                            #     "op"    :   "RequantizationRange",
+                            #     "input_name_extra"  : False,
+                            #     "input" :  [
+                            #                 "quantized_mm_b",
+                            #                 "quantized_mm_b:1",
+                            #                 "quantized_mm_b:2"
+                            #                ], 
+                            #     "attr"  :   {
+                            #                 "Tinput":{"type":"dtype", "v":dtypes.qint32},
+                            #                 }
+                            # },
+                            # "requantize":
+                            # {
+                            #     "name"  :   "requantize",
+                            #     "op"    :   "Requantize",
+                            #     "input_name_extra"  : False,
+                            #     "input" :  [
+                            #                 "quantized_mm_b",
+                            #                 "quantized_mm_b:1",
+                            #                 "quantized_mm_b:2",
+                            #                 "requantization_range",
+                            #                 "requantization_range:1"
+                            #                ], 
+                            #     "attr"  :   {
+                            #                 "Tinput":{"type":"dtype", "v":dtypes.qint32},
+                            #                 "out_type":{"type":"dtype", "v":dtypes.quint8},
+                            #                 }
+                            # },
+                            # "dequantize":
+                            # {
+                            #     "name"  :   "dequantize",
+                            #     "op"    :   "Dequantize",
+                            #     "input_name_extra"  : False,
+                            #     "input" :  [
+                            #                 "requantize",
+                            #                 "requantize:1",
+                            #                 "requantize:2"
+
+                            #                ], 
+                            #     "attr"  :   {
+                            #                 "mode":{"type":"string", "v":b"MIN_FIRST"},
+                            #                 "T":{"type":"dtype", "v":dtypes.quint8},
+                            #                 }
+                            # },
+
+
+                            # "addn":
+                            # {
+                            #     "name"  : "addn",
+                            #     "op"    : "AddN",
+                            #     "input" : ["matmul_fp32", 
+                            #                 "dequantize"],
+                            #                #"quantized_mm_b_deq"],
+                            #                 #"matmul_int8"],
+                            #     "attr"  :   {
+                            #                 "N":{"type":"int", "v":2},
+                            #                 "T":{"type":"dtype", "v":dtypes.float32}
+                            #                 }
+                            # },
+                            # "bias_add":
+                            # {
+                            #     "name"  : "bias_add",
+                            #     "op"    : "BiasAdd",
+                            #     "input" : ["addn", "const_bias"],
+                            #     "attr"  :   {
+                            #                 "T":{"type":"dtype", "v":dtypes.float32}
+                            #                 }
+                            # },
+                            # "const_bias":
+                            # {
+                            #     "name"  : "const_bias",
+                            #     "op"    : "Const",
+                            #     "type"  : dtypes.float32,
+                            #     "shape" : None,
+                            #     "const_v"   :   all_const["b"]
+                            # },
+                            # "relu":
+                            # {
+                            #     "name"  : fc_cfg["fc_output_node_name"],
+                            #     "op"    : "Relu",
+                            #     "input" : ["bias_add"],
+                            #     "attr"  :   {
+                            #                 "T":{"type":"dtype", "v":dtypes.float32}
+                            #                 }
+                                
+                            # }
     
                   }
 
@@ -209,23 +228,22 @@ def get_nodes_control_pannel(gr, fc_cfg):
                     "name_extra":fc_cfg["name_extra"],
                     "name_extra_connection":fc_cfg["name_extra_connection"],
                      "to_be_removed":fc_cfg["to_be_removed"],
-                    "to_be_added":[_node_infor["split"],
-                                   _node_infor["const_size_splits"],
-                                   _node_infor["const_split_dim"],
-                                   _node_infor["concat_1"],
-                                   _node_infor["const_concat1_axis"],        
-                                   _node_infor["concat_2"],
-                                   _node_infor["const_concat2_axis"],
-                                   _node_infor["matmul_fp32"],
-                                   _node_infor["const_wt_fp32"], 
-                                   _node_infor["matmul_int8"],        
+                    "to_be_added":[_node_infor["quantize_v2"],
+                                   _node_infor["const_a_min"],
+                                   _node_infor["const_a_max"],
+                                   #_node_infor["quantized_mm_b_deq"],
+                                   _node_infor["quantized_mm_b_r_deq"],
                                    _node_infor["const_wt_int8"],
-                                   _node_infor["bias_add_dummy"],
-                                   _node_infor["const_wt_comp"],                                   
-                                   _node_infor["addn"],
-                                   _node_infor["bias_add"],
-                                   _node_infor["const_bias"],
-                                   _node_infor["relu"],
+                                   _node_infor["const_b_comp"],
+                                   _node_infor["const_wt_min"],
+                                   _node_infor["const_wt_max"],
+                                   # _node_infor["requantization_range"],
+                                   # _node_infor["requantize"],
+                                   # _node_infor["dequantize"],
+                                   # _node_infor["addn"],
+                                   # _node_infor["bias_add"],
+                                   # _node_infor["const_bias"],
+                                   #_node_infor["relu"],
                                   ],
                     "to_be_updated":{
                                             }

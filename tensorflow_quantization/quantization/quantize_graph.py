@@ -716,7 +716,7 @@ class GraphRewriter(object):
             self.nodes_map[output_node_name]
             for output_node_name in output_node_names
         ]
-        if self.mode == "mm_split_fuse":
+        if self.mode == "clip_exp":
             self.already_visited = {}
             if FLAGS.fc_cfg is not "":
                 self.rewrite_nodes(FLAGS.fc_cfg, self.mode)
@@ -2214,7 +2214,7 @@ def main(unused_args):
         return -1
 
     known_modes = [
-        "round", "quantize", "eightbit", "weights", "test", "weights_rounded", "mm_split_fuse"
+        "round", "quantize", "eightbit", "weights", "test", "weights_rounded", "clip_exp"
     ]
     if not any(FLAGS.mode in s for s in known_modes):
         print("mode is '" + FLAGS.mode + "', not in " + ", ".join(known_modes) +
