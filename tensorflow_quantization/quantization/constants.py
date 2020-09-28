@@ -11,7 +11,9 @@ def generate_const(gr, all_const, _node_infor, a_min, a_max ):
     a_min = np.min(act)
     a_max = np.max(act)
     a_min = -1.64317
-    a_max = 4.51301
+    #a_max = 4.51301
+    #a_max = 2.51301
+    a_max = 1.64317
 
     matmul_weight_name = all_const["weight_node_name"]
     bias_name= all_const["bias_node_name"]
@@ -92,8 +94,8 @@ def generate_const(gr, all_const, _node_infor, a_min, a_max ):
 
     bias_scale = 255.0 * 127.0 / ((a_max - a_min) * abs_max)
     ws8_1 = np.sum(np.array(weight_qint8_tensor, dtype=np.int32),axis=0,dtype=np.int32)
-    qint32_bias = np.around((bias_float_tensor * bias_scale) + (ws8_1*QaAmin))
-    #qint32_bias = np.around(bias_float_tensor * bias_scale)
+    #qint32_bias = np.around((bias_float_tensor * bias_scale) + (ws8_1*QaAmin))
+    qint32_bias = np.around(bias_float_tensor * bias_scale)
 
 
     #print(bias_scale)
