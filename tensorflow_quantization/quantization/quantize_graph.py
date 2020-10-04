@@ -613,7 +613,7 @@ class GraphRewriter(object):
     def rewrite_nodes(self, model_fc_cfg_name, mode):
         node_name_l = self.get_node_name_list()
         _node_control_pannel = get_nodes_control_pannel(self, model_fc_cfg_name, mode)
-        print(_node_control_pannel)
+        #print(_node_control_pannel)
         if _node_control_pannel is None:
             return
         to_be_removed = _node_control_pannel["to_be_removed"]
@@ -644,12 +644,12 @@ class GraphRewriter(object):
             #print("===>", to_add_node)
 
             if to_add_node["op"] not in "Const":
-                print('########### In Ops ###################')
+                #print('########### In Ops ###################')
                 input_l = update_input_name_with_extra(to_add_node["input"], to_add_node)
                 node_name_with_extra =  get_name_extra(to_add_node["name"])
-                print(node_name_with_extra)
-                print(to_add_node["op"])
-                print(input_l)
+                # print(node_name_with_extra)
+                # print(to_add_node["op"])
+                # print(input_l)
                 new_node = create_node(to_add_node["op"], node_name_with_extra, input_l)  
                 if to_add_node["attr"] is not None:
                     for attr in to_add_node["attr"].keys():
@@ -666,8 +666,8 @@ class GraphRewriter(object):
                             
                 self.add_output_graph_node(new_node)
             else:
-                print("===>", to_add_node)
-                print('########### In const node #######################')
+                # print("===>", to_add_node)
+                # print('########### In const node #######################')
                 shape = to_add_node["shape"]
                 shape = None 
                 '''
