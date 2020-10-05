@@ -70,13 +70,32 @@ def qd(x, scale):
 
 def compute_loss(x, xmin, xmax):
     scale = 127/np.max(np.abs([xmin, xmax]))
-    print('In comput loss xmin:', xmin)
-    print('In comput loss xmax:', xmax)
-    print('In comput loss scale:', scale)
+    # print('In comput loss xmin:', xmin)
+    # print('In comput loss xmax:', xmax)
+    # print('In comput loss scale:', scale)
     
     dq = qd(x,scale)
     loss = np.square(np.subtract(x, dq)).mean()
-    print('In comput loss :', loss)
+    # print('In comput loss :', loss)
+    return (loss)
+
+def qd_mf(x, scale, xmin):
+    # min_q_val = -127, 
+    # max_q_val = 127
+    # scale = 127/alpha
+    q = (np.around((x-xmin)*scale)).astype(np.uint8)
+    dq = (q/scale + xmin).astype(np.float)
+    return dq
+
+def compute_loss_mf(x, xmin, xmax):
+    scale = 255/(xmax-xmin)
+    # print('In comput loss xmin:', xmin)
+    # print('In comput loss xmax:', xmax)
+    # print('In comput loss scale:', scale)
+    
+    dq = qd_mf(x, scale, xmin)
+    loss = np.square(np.subtract(x, dq)).mean()
+    # print('In comput loss :', loss)
     return (loss)
 
 
@@ -84,7 +103,7 @@ def find_clip_greedy_search(x, bins, r):
     xmin = cur_min = np.min(x)
     xmax = cur_max = np.max(x)
 
-    loss = compute_loss(x, xmin, xmax)
+    loss = compute_loss_mf(x, xmin, xmax)
     stepsize = (xmax - xmin)/bins
     min_steps = bins * (1 - r) * stepsize
     print('max:', xmax)
@@ -92,17 +111,21 @@ def find_clip_greedy_search(x, bins, r):
     print('min_steps:', min_steps)
     print('stepsize:', stepsize)
 
-
-    while cur_min + min_steps < cur_max:
+    i = 0
+    # while cur_min + min_steps < cur_max:
+    while cur_min < cur_max:
+        i+=1
+        # print('cur_min + min_steps :', cur_min + min_steps)
+        # print('cur_max :', cur_max)
         print('cur_min:', cur_min)
         print('cur_max:', cur_max)
-        print('loss:', loss)
+        # print('loss:', loss)
 
-        loss_l = compute_loss(x, cur_min+stepsize, cur_max)
-        loss_r = compute_loss(x, cur_min, cur_max-stepsize)
+        loss_l = compute_loss_mf(x, cur_min+stepsize, cur_max)
+        loss_r = compute_loss_mf(x, cur_min, cur_max-stepsize)
         
-        print('loss_l:', loss_l)
-        print('loss_r:', loss_r)
+        # print('loss_l:', loss_l)
+        # print('loss_r:', loss_r)
 
         if loss_l < loss_r:
             cur_min = cur_min + stepsize
@@ -118,7 +141,66 @@ def find_clip_greedy_search(x, bins, r):
 
     print('Final max:', xmax)
     print('Final min:', xmin)
+    print('loop runs for:', i)
     return xmin, xmax
 
 
-    
+def find_clip_greedy_search_1(x, bins, r):
+    xmin = cur_min = np.min(x)
+    xmax = cur_max = np.max(x)
+
+    loss = compute_loss_mf(x, xmin, xmax)
+    stepsize = (xmax - xmin)/bins
+    min_steps = bins * (1 - r) * stepsize
+    print('max:', xmax)
+    print('min:', xmin)
+    # print('min_steps:', min_steps)
+    print('stepsize:', stepsize)
+
+    i=0
+    # while cur_min < 0:
+    #     cur_max = xmax
+    #     while cur_max > 0:
+    #         i+=1
+    #         loss_new = compute_loss_mf(x, cur_min, cur_max)
+    #         # print('cur_min:', cur_min)
+    #         # print('cur_max:', cur_max)        
+    #         # print('new_loss:', loss_new)
+    #         if loss_new < loss:
+    #             loss = loss_new
+    #             xmin_new = cur_min
+    #             xmax_new = cur_max    
+    #             print('xmax:', xmax_new)
+    #             print('xmin:', xmin_new)
+    #             print('new_loss:', loss_new)
+
+    #         cur_max = cur_max - stepsize
+    #     print('cur_min:', cur_min)
+    #     cur_min = cur_min + stepsize
+
+    cur_min = -stepsize
+    while cur_min > xmin:
+        cur_max = stepsize
+        while cur_max < xmax:
+            i+=1
+            loss_new = compute_loss_mf(x, cur_min, cur_max)
+            # print('cur_min:', cur_min)
+            # print('cur_max:', cur_max)        
+            # print('new_loss:', loss_new)
+            if loss_new < loss:
+                loss = loss_new
+                xmin_new = cur_min
+                xmax_new = cur_max    
+                print('xmax:', xmax_new)
+                print('xmin:', xmin_new)
+                print('new_loss:', loss_new)
+
+            cur_max = cur_max + stepsize
+        print('cur_min:', cur_min)
+        cur_min = cur_min - stepsize
+
+  
+    print('Final max:', xmax_new)
+    print('Final min:', xmin_new)
+    print('loop runs for:', i)
+    return xmin_new, xmax_new

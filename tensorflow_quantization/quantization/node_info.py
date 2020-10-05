@@ -32,12 +32,12 @@ def get_nodes_control_pannel(gr, fc_cfg):
                                             "const_a_max",
                                            ], 
                                 "attr"  :   {
-                                            #"T":{"type":"dtype", "v":dtypes.quint8},
-                                            #"mode":{"type":"string", "v":b"MIN_FIRST"},
-                                            "T":{"type":"dtype", "v":dtypes.qint8},
-                                            "mode":{"type":"string", "v":b"SCALED"},
-                                            #"round_mode":{"type":"string", "v":b"HALF_AWAY_FROM_ZERO"},
-                                            "round_mode":{"type":"string", "v":b"HALF_TO_EVEN"},
+                                            "T":{"type":"dtype", "v":dtypes.quint8},
+                                            "mode":{"type":"string", "v":b"MIN_FIRST"},
+                                            # "T":{"type":"dtype", "v":dtypes.qint8},
+                                            # "mode":{"type":"string", "v":b"SCALED"},
+                                            "round_mode":{"type":"string", "v":b"HALF_AWAY_FROM_ZERO"},
+                                            # "round_mode":{"type":"string", "v":b"HALF_TO_EVEN"},
                                             }
                             },
                             "const_a_min":
@@ -74,15 +74,15 @@ def get_nodes_control_pannel(gr, fc_cfg):
                                             #"const_max_freezed_output"
                                            ], 
                                 "attr"  :   {
-                                            #"T1":{"type":"dtype", "v":dtypes.quint8},
-                                            "T1":{"type":"dtype", "v":dtypes.qint8},
+                                            "T1":{"type":"dtype", "v":dtypes.quint8},
+                                            # "T1":{"type":"dtype", "v":dtypes.qint8},
                                             "T2":{"type":"dtype", "v":dtypes.qint8},
                                             "Tbias":{"type":"dtype", "v":dtypes.qint32},
                                             #"Tbias":{"type":"dtype", "v":dtypes.float32},
                                             "Toutput":{"type":"dtype", "v":dtypes.float32},
                                             #"Toutput":{"type":"dtype", "v":dtypes.qint32},
-                                            #"input_quant_mode":{"type":"string", "v":b"MIN_FIRST"},
-                                            "input_quant_mode":{"type":"string", "v":b"SCALED"},
+                                            "input_quant_mode":{"type":"string", "v":b"MIN_FIRST"},
+                                            # "input_quant_mode":{"type":"string", "v":b"SCALED"},
                                             "transpose_a":{"type":"bool", "v":False},
                                             "transpose_b":{"type":"bool", "v":False}
                                             }

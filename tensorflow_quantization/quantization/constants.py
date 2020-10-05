@@ -20,7 +20,7 @@ def MSE(fp32, fr_min, fr_max):
 def MSE_MF(fp32, fr_min, fr_max):
     print('fr_min and fr_max :', fr_min, fr_max)
     scale = 255/(fr_max-fr_min)
-    q = (np.around((fp32-fr_min)*scale)).astype(np.int8)
+    q = (np.around((fp32-fr_min)*scale)).astype(np.uint8)
     d = (q/scale + fr_min).astype(np.float)
     mse = np.square(np.subtract(fp32, d)).mean()
     print(fp32)
@@ -47,7 +47,7 @@ def generate_const(gr, all_const, _node_infor, clip_method, a_min, a_max ):
     if (clip_method == "kl"):
         # clip activation and weight
         a_max, a_min = KL.get_threshold(act, 1001, 256)        
-        w_max, w_min = KL.get_threshold(weight_float_tensor, 1001, 256) 
+        # w_max, w_min = KL.get_threshold(weight_float_tensor, 1001, 256) 
         
         # result 
         # MSE of activation with a_min -1.1104698181152344 a_max 1.098185658454895 is 0.0012414596203425777
@@ -56,44 +56,51 @@ def generate_const(gr, all_const, _node_infor, clip_method, a_min, a_max ):
     elif (clip_method == 'hist_apprx'):
         hist_apprx_act = l2norm.HistMethods(act, 1001, 256)
         a_min, a_max = hist_apprx_act.hist_approx()
-        hist_apprx_wt = l2norm.HistMethods(weight_float_tensor, 1001, 256)
-        w_min, w_max = hist_apprx_wt.hist_approx()
+        # hist_apprx_wt = l2norm.HistMethods(weight_float_tensor, 1001, 256)
+        # w_min, w_max = hist_apprx_wt.hist_approx()
         
         # a_min and a_max -2.1238529682159424 3.4973917348044257 , MSE - 0.0005272489574935392
         # w_min and w_max -0.4037606082596145 0.3738432779655114 , MSE -  9.95771682321469e-06
         # MSE = 1.4419837e-05
     elif (clip_method == 'hist_brute'):
-        hist_brute_act = l2norm.HistMethods(act, 1001, 256)
+        hist_brute_act = l2norm.HistMethods(act, 201, 256)
         a_min, a_max = hist_brute_act.hist_brute()
-        hist_brute_wt = l2norm.HistMethods(weight_float_tensor, 1001, 256)
-        w_min, w_max = hist_brute_wt.hist_brute()
+        # hist_brute_wt = l2norm.HistMethods(weight_float_tensor, 1001, 256)
+        # w_min, w_max = hist_brute_wt.hist_brute()
 
         # hist_brute_act = l2norm.HistMethods(act, 201, 256)
         # MSE of activation with a_min -1.4336993053777896 a_max 3.5267801462714345 is 0.0005234494730955198
         # MSE of weight with w_min -0.38693374543640746 w_max 0.349977678327418 is 1.3051032840061372e-05
     elif (clip_method == 'aciq'):
         a_max = ag.find_clip_aciq(act, 8)
-        w_max = ag.find_clip_aciq(weight_float_tensor, 8)
+        # w_max = ag.find_clip_aciq(weight_float_tensor, 8)
         a_min = -a_max
-        w_min = -w_max
+        # w_min = -w_max
 
     elif (clip_method == 'gs'):
-        # a_min, a_max = ag.find_clip_greedy_search(act, 200, 0.16)
-        w_min, w_max = ag.find_clip_greedy_search(weight_float_tensor, 200, 0.16)
+        a_min, a_max = ag.find_clip_greedy_search_1(act, 200, 0.16)
+        # w_min, w_max = ag.find_clip_greedy_search(weight_float_tensor, 200, 0.16)
 
+    # a_min = -1.64317
+    # a_max = 1.64317
+    # a_max = 4.51301
+    #a_max = 2.51301
+    a_min = -1.907412185668947
+    a_max =  5.93898794174193
+
+    # w_min = -0.5391701790724762
+    # w_max = 0.5391701790724762
+
+    
 
     print('clip_method used :', clip_method)
     print ('a_min and a_max', a_min, a_max)
     print ('w_min and w_max', w_min, w_max)
     
-    print('MSE of activation with a_min {} a_max {} is {}'.format(a_min, a_max, MSE(act, a_min, a_max)))
-    #print('MSE of activation with a_min {} a_max {} is {}'.format(a_min, a_max, MSE_MF(act, -1.64317, 2.51301)))
+    #print('MSE of activation with a_min {} a_max {} is {}'.format(a_min, a_max, MSE(act, a_min, a_max)))
+    print('MSE of activation with a_min {} a_max {} is {}'.format(a_min, a_max, MSE_MF(act, a_min, a_max)))
     print('MSE of weight with w_min {} w_max {} is {}'.format(w_min, w_max, MSE(weight_float_tensor, w_min, w_max)))
     
-    #a_min = -1.64317
-    #a_max = 1.64317
-    #a_max = 4.51301
-    #a_max = 2.51301
     
  
     abs_max_act = np.max(np.abs([a_min, a_max]))
@@ -104,15 +111,15 @@ def generate_const(gr, all_const, _node_infor, clip_method, a_min, a_max ):
 
     ###### Bias compensation ###########
     # compensated with B's32 = Q'a * Qw * Bf32 + Q'a * Min(Af32) * 1 *ws8.
-    #QaAmin  = 255 * a_min / (a_max - a_min);
+    QaAmin  = 255 * a_min / (a_max - a_min);
 
     int32_bias = []
 
-    #bias_scale = 255.0 * 127.0 / ((a_max - a_min) * abs_max_wt)
-    bias_scale = 127.0 * 127.0 / (abs_max_act * abs_max_wt)
-    #ws8_1 = np.sum(np.array(weight_qint8_tensor, dtype=np.int32),axis=0,dtype=np.int32)
-    #qint32_bias = np.around((bias_float_tensor * bias_scale) + (ws8_1*QaAmin))
-    qint32_bias = np.around(bias_float_tensor * bias_scale)
+    bias_scale = 255.0 * 127.0 / ((a_max - a_min) * abs_max_wt)
+    # bias_scale = 127.0 * 127.0 / (abs_max_act * abs_max_wt)
+    ws8_1 = np.sum(np.array(weight_qint8_tensor, dtype=np.int32),axis=0,dtype=np.int32)
+    qint32_bias = np.around((bias_float_tensor * bias_scale) + (ws8_1*QaAmin))
+    # qint32_bias = np.around(bias_float_tensor * bias_scale)
 
   
 
