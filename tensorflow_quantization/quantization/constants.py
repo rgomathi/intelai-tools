@@ -85,8 +85,8 @@ def generate_const(gr, all_const, _node_infor, clip_method, a_min, a_max ):
     # a_max = 1.64317
     # a_max = 4.51301
     #a_max = 2.51301
-    a_min = -1.907412185668947
-    a_max =  5.93898794174193
+    a_min = -1.43055913925171
+    a_max =  3.8148243713378944
 
     # w_min = -0.5391701790724762
     # w_max = 0.5391701790724762
@@ -98,10 +98,13 @@ def generate_const(gr, all_const, _node_infor, clip_method, a_min, a_max ):
     print ('w_min and w_max', w_min, w_max)
     
     #print('MSE of activation with a_min {} a_max {} is {}'.format(a_min, a_max, MSE(act, a_min, a_max)))
-    print('MSE of activation with a_min {} a_max {} is {}'.format(a_min, a_max, MSE_MF(act, a_min, a_max)))
+    print('MSE of activation with a_min {} a_max {} is {}'.format(a_min, a_max, ag.compute_loss_tf(act, a_min, a_max)))
     print('MSE of weight with w_min {} w_max {} is {}'.format(w_min, w_max, MSE(weight_float_tensor, w_min, w_max)))
     
     
+    #######################
+    #### ocs - overwite min/max here after ocs implementaion
+
  
     abs_max_act = np.max(np.abs([a_min, a_max]))
     abs_max_wt  = np.max(np.abs([w_min, w_max]))

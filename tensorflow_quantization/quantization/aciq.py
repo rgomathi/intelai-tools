@@ -1,4 +1,6 @@
 import numpy as np
+import tensorflow as tf
+# from tensorflow.python.ops.gen_math_ops import quantize, dequantize
 
 def quantize(x, num_bits, alpha):
     min_q_val = -127, 
@@ -80,11 +82,9 @@ def compute_loss(x, xmin, xmax):
     return (loss)
 
 def qd_mf(x, scale, xmin):
-    # min_q_val = -127, 
-    # max_q_val = 127
-    # scale = 127/alpha
     q = (np.around((x-xmin)*scale)).astype(np.uint8)
     dq = (q/scale + xmin).astype(np.float)
+    
     return dq
 
 def compute_loss_mf(x, xmin, xmax):
@@ -98,12 +98,35 @@ def compute_loss_mf(x, xmin, xmax):
     # print('In comput loss :', loss)
     return (loss)
 
+    
+def compute_loss_tf(x, xmin, xmax):
+    # scale = 255/(xmax-xmin)
+    # print('In comput loss xmin:', xmin)
+    # print('In comput loss xmax:', xmax)
+    # print('In comput loss scale:', scale)
+    
+    # dq = qd_mf(x, scale, xmin)
+    # loss = np.square(np.subtract(x, dq)).mean()
+    # print('In comput loss :', loss)
+    graph =tf.Graph()
+    with graph.as_default():
+        q_tf, min_tf, max_tf = tf.compat.v1.quantize(x, xmin, xmax, tf.quint8,  mode='MIN_FIRST')
+        dq_tf = tf.compat.v1.dequantize(q_tf, min_tf, max_tf, mode='MIN_FIRST')
+
+        with tf.compat.v1.Session() as sess:
+            dq = sess.run(dq_tf)
+            loss = np.square(np.subtract(x, dq)).mean()
+
+
+    return (loss)
+
 
 def find_clip_greedy_search(x, bins, r):
     xmin = cur_min = np.min(x)
     xmax = cur_max = np.max(x)
 
     loss = compute_loss_mf(x, xmin, xmax)
+    
     stepsize = (xmax - xmin)/bins
     min_steps = bins * (1 - r) * stepsize
     print('max:', xmax)
@@ -149,7 +172,8 @@ def find_clip_greedy_search_1(x, bins, r):
     xmin = cur_min = np.min(x)
     xmax = cur_max = np.max(x)
 
-    loss = compute_loss_mf(x, xmin, xmax)
+    loss = compute_loss_tf(x, xmin, xmax)
+    print('loss from tf', loss)
     stepsize = (xmax - xmin)/bins
     min_steps = bins * (1 - r) * stepsize
     print('max:', xmax)
@@ -183,7 +207,7 @@ def find_clip_greedy_search_1(x, bins, r):
         cur_max = stepsize
         while cur_max < xmax:
             i+=1
-            loss_new = compute_loss_mf(x, cur_min, cur_max)
+            loss_new = compute_loss_tf(x, cur_min, cur_max)
             # print('cur_min:', cur_min)
             # print('cur_max:', cur_max)        
             # print('new_loss:', loss_new)
