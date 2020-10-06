@@ -7,6 +7,7 @@ def get_nodes_control_pannel(gr, fc_cfg):
                                     "weight_node_name":fc_cfg["weight_node_name"],
                                     "bias_node_name":fc_cfg["bias_node_name"],
                                     "input_shape": None,
+                                    "act_new": None,
                                     "b": None,
                                     "w_for_fp32": None,
                                     "w_for_int8": None,
@@ -27,7 +28,8 @@ def get_nodes_control_pannel(gr, fc_cfg):
                                 "op"    :   "QuantizeV2",
                                 "input_name_extra"  : False,
                                 "input" :  [
-                                            fc_cfg["input_node_name"],
+                                            # fc_cfg["input_node_name"],
+                                            "const_act_new",
                                             "const_a_min",
                                             "const_a_max",
                                            ], 
@@ -39,6 +41,14 @@ def get_nodes_control_pannel(gr, fc_cfg):
                                             "round_mode":{"type":"string", "v":b"HALF_AWAY_FROM_ZERO"},
                                             # "round_mode":{"type":"string", "v":b"HALF_TO_EVEN"},
                                             }
+                            },
+                            "const_act_new":
+                            {
+                                "name"  : "const_act_new",
+                                "op"    : "Const",
+                                "type"  : dtypes.float32,
+                                "shape" : None,
+                                "const_v"   :   all_const["act_new"]
                             },
                             "const_a_min":
                             {
@@ -232,6 +242,7 @@ def get_nodes_control_pannel(gr, fc_cfg):
                     "to_be_added":[_node_infor["quantize_v2"],
                                    _node_infor["const_a_min"],
                                    _node_infor["const_a_max"],
+                                   _node_infor["const_act_new"],
                                    #_node_infor["quantized_mm_b_deq"],
                                    _node_infor["quantized_mm_b_r_deq"],
                                    _node_infor["const_wt_int8"],

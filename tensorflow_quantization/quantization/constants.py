@@ -5,6 +5,7 @@ import tensorflow as tf
 import KL
 import hist_l2norm as l2norm
 import aciq as ag
+import ocs
 
 def MSE(fp32, fr_min, fr_max):
     scale = 127/(np.max(np.abs([fr_min, fr_max])))
@@ -27,6 +28,17 @@ def MSE_MF(fp32, fr_min, fr_max):
     print(q)
     print(d)
     return mse
+
+def act_split(act, in_channels_to_copy):
+    graph =tf.Graph()
+    with graph.as_default():
+        indices_to_concat = tf.gather(act, in_channels_to_copy, axis=1)
+        act_split = tf.concat([act, indices_to_concat], 1)
+
+        with tf.compat.v1.Session() as sess:
+            act_split_r = sess.run(act_split)
+
+    return (act_split_r)
 
 def generate_const(gr, all_const, _node_infor, clip_method, a_min, a_max ):
 
@@ -85,7 +97,7 @@ def generate_const(gr, all_const, _node_infor, clip_method, a_min, a_max ):
     # a_max = 1.64317
     # a_max = 4.51301
     #a_max = 2.51301
-    a_min = -1.43055913925171
+    a_min = -1.43055913925171   
     a_max =  3.8148243713378944
 
     # w_min = -0.5391701790724762
@@ -104,11 +116,28 @@ def generate_const(gr, all_const, _node_infor, clip_method, a_min, a_max ):
     
     #######################
     #### ocs - overwite min/max here after ocs implementaion
+    weights_splitted, in_channels_to_split = ocs.ocs_wts(weight_float_tensor)
+
+    print('weights_splitted', weights_splitted)
+    print('in_channels_to_split', in_channels_to_split)
+    print('weights_splitted shape',weights_splitted.shape[0], weights_splitted.shape[1] )
+
+    act_splitted = act_split(act, in_channels_to_split)
+    print('act_splitted shape', act_splitted.shape[0], act_splitted.shape[1])
+
+    a_min = np.min(act_splitted)
+    a_max = np.max(act_splitted)
+    w_min = np.min(weights_splitted)
+    w_max = np.max(weights_splitted)
+    print('MSE of activation with a_min {} a_max {} is {}'.format(a_min, a_max, ag.compute_loss_tf(act, a_min, a_max)))
+    print('MSE of weight with w_min {} w_max {} is {}'.format(w_min, w_max, MSE(weights_splitted, w_min, w_max)))
+    
 
  
     abs_max_act = np.max(np.abs([a_min, a_max]))
     abs_max_wt  = np.max(np.abs([w_min, w_max]))
-    weight_qint8_tensor = (np.around(weight_float_tensor*127/abs_max_wt)).astype(np.int8)
+    # weight_qint8_tensor = (np.around(weight_float_tensor*127/abs_max_wt)).astype(np.int8)
+    weight_qint8_tensor = (np.around(weights_splitted*127/abs_max_wt)).astype(np.int8)
     
  
 
@@ -138,6 +167,8 @@ def generate_const(gr, all_const, _node_infor, clip_method, a_min, a_max ):
     all_const["w_min"] = w_min
     all_const["w_max"] = w_max
     all_const["b_comp"] = qint32_bias
+    all_const["act_new"]=act_splitted
+
     
     _node_infor["const_a_min"]["const_v"] = a_min
     _node_infor["const_a_max"]["const_v"] = a_max
@@ -148,6 +179,7 @@ def generate_const(gr, all_const, _node_infor, clip_method, a_min, a_max ):
     _node_infor["const_wt_min"]["const_v"] = w_min
     _node_infor["const_wt_max"]["const_v"] = w_max
     _node_infor["const_b_comp"]["const_v"] = qint32_bias#np.zeros((bias_float_tensor.shape))
+    _node_infor["const_act_new"]["const_v"] = act_splitted
 
 
     #_node_infor["const_bz_qint32"]["const_v"] = qint32_bias
