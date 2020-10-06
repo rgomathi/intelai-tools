@@ -172,7 +172,7 @@ def find_clip_greedy_search_1(x, bins, r):
     xmin = cur_min = np.min(x)
     xmax = cur_max = np.max(x)
 
-    loss = compute_loss_tf(x, xmin, xmax)
+    loss = compute_loss_mf(x, xmin, xmax)
     print('loss from tf', loss)
     stepsize = (xmax - xmin)/bins
     min_steps = bins * (1 - r) * stepsize
@@ -207,7 +207,7 @@ def find_clip_greedy_search_1(x, bins, r):
         cur_max = stepsize
         while cur_max < xmax:
             i+=1
-            loss_new = compute_loss_tf(x, cur_min, cur_max)
+            loss_new = compute_loss_mf(x, cur_min, cur_max)
             # print('cur_min:', cur_min)
             # print('cur_max:', cur_max)        
             # print('new_loss:', loss_new)

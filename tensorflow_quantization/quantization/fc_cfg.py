@@ -32,8 +32,8 @@ matmul_1_5_cfg={
                                 #  "clip_method":"hist_apprx" 
                                 #  "clip_method":"hist_brute" 
                                 #  "clip_method":"aciq" 
-                                # "clip_method":"gs" 
-                                 "clip_method" : "None"
+                                "clip_method":"gs" 
+                                #  "clip_method" : "None"
                              }
 fc_cfg_setting = { 
 #                    "matmul_tb" :  matmul_tb_cfg,

@@ -7,7 +7,7 @@ def get_nodes_control_pannel(gr, fc_cfg):
                                     "weight_node_name":fc_cfg["weight_node_name"],
                                     "bias_node_name":fc_cfg["bias_node_name"],
                                     "input_shape": None,
-                                    "act_new": None,
+                                    # "act_new": None,
                                     "b": None,
                                     "w_for_fp32": None,
                                     "w_for_int8": None,
@@ -16,12 +16,61 @@ def get_nodes_control_pannel(gr, fc_cfg):
                                     "w_max" : None,
                                     "a_min" : None,
                                     "a_max" : None,
-                                    "b_comp": None
-                                    #"bias_float": None,
+                                    "b_comp": None,
+                                    "in_channels_to_copy": None
                                 }
 
     _node_infor = {
-                           
+                           "gather":
+                            {
+                                "name"  :   "gather",
+                                "op"    :   "GatherV2",
+                                "input_name_extra"  : False,
+                                "input" :  [
+                                            fc_cfg["input_node_name"],
+                                            "const_in_channels_to_copy",
+                                            "const_axis",
+                                           ], 
+                                "attr"  :   {
+                                            "batch_dims":{"type":"int", "v":0},
+                                            "Taxis":{"type":"dtype", "v":dtypes.int32},
+                                            "Tindices":{"type":"dtype", "v":dtypes.int32},
+                                            "Tparams":{"type":"dtype", "v":dtypes.float32},
+                                            }
+                            },
+                            "const_in_channels_to_copy":
+                            {
+                                "name"  : "const_in_channels_to_copy",
+                                "op"    : "Const",
+                                "type"  : dtypes.int32,
+                                "shape" : None,
+                                "const_v"   :   all_const["in_channels_to_copy"]
+                            },
+                            "const_axis":
+                            {
+                                "name"  : "const_axis",
+                                "op"    : "Const",
+                                "type"  : dtypes.int32,
+                                "shape" : None,
+                                "const_v"   :   1
+                            },
+                            "concat":
+                            {
+                                "name"  :   "concat",
+                                "op"    :   "ConcatV2",
+                                "input_name_extra"  : False,
+                                "input" :  [
+                                            fc_cfg["input_node_name"],
+                                            "gather",
+                                            "const_axis",
+                                           ], 
+                                "attr"  :   {
+                                            "N":{"type":"int", "v":2},
+                                            "Tidx":{"type":"dtype", "v":dtypes.int32},
+                                            "T":{"type":"dtype", "v":dtypes.float32},
+                                            }
+                            },
+
                             "quantize_v2":
                             {
                                 "name"  :   "quantize_v2",
@@ -29,7 +78,7 @@ def get_nodes_control_pannel(gr, fc_cfg):
                                 "input_name_extra"  : False,
                                 "input" :  [
                                             # fc_cfg["input_node_name"],
-                                            "const_act_new",
+                                            "concat",
                                             "const_a_min",
                                             "const_a_max",
                                            ], 
@@ -42,14 +91,7 @@ def get_nodes_control_pannel(gr, fc_cfg):
                                             # "round_mode":{"type":"string", "v":b"HALF_TO_EVEN"},
                                             }
                             },
-                            "const_act_new":
-                            {
-                                "name"  : "const_act_new",
-                                "op"    : "Const",
-                                "type"  : dtypes.float32,
-                                "shape" : None,
-                                "const_v"   :   all_const["act_new"]
-                            },
+                            
                             "const_a_min":
                             {
                                 "name"  : "const_a_min",
@@ -239,10 +281,14 @@ def get_nodes_control_pannel(gr, fc_cfg):
                     "name_extra":fc_cfg["name_extra"],
                     "name_extra_connection":fc_cfg["name_extra_connection"],
                      "to_be_removed":fc_cfg["to_be_removed"],
-                    "to_be_added":[_node_infor["quantize_v2"],
+                    "to_be_added":[_node_infor["gather"],
+                                    _node_infor["concat"],
+                                    _node_infor["const_in_channels_to_copy"],
+                                    _node_infor["const_axis"],
+                                    _node_infor["quantize_v2"],
                                    _node_infor["const_a_min"],
                                    _node_infor["const_a_max"],
-                                   _node_infor["const_act_new"],
+                                #    _node_infor["const_act_new"],
                                    #_node_infor["quantized_mm_b_deq"],
                                    _node_infor["quantized_mm_b_r_deq"],
                                    _node_infor["const_wt_int8"],
