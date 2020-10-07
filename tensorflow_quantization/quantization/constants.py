@@ -1,5 +1,6 @@
 import os
 from tensorflow.python.framework import tensor_util, graph_io
+# from tensorflow.python.client import session
 import numpy as np
 from tensorflow.python.framework import dtypes
 import tensorflow as tf
@@ -105,8 +106,8 @@ def generate_const(gr, all_const, _node_infor, clip_method, a_min, a_max ):
     #a_max = 2.51301
     # a_min = -1.43055913925171   
     # a_max =  3.8148243713378944
-    # a_min = -2.080813293457033
-    # a_max = 5.722236557006824
+    a_min = -2.080813293457033
+    a_max = 5.722236557006824
     # a_min = -1.907412185668947
     # a_max = 5.93898794174193
 
@@ -121,17 +122,21 @@ def generate_const(gr, all_const, _node_infor, clip_method, a_min, a_max ):
     print ('w_min and w_max', w_min, w_max)
     
     #print('MSE of activation with a_min {} a_max {} is {}'.format(a_min, a_max, MSE(act, a_min, a_max)))
-    print('MSE of activation with a_min {} a_max {} is {}'.format(a_min, a_max, ag.compute_loss_tf(act, a_min, a_max)))
+    print('MSE of activation with a_min {} a_max {} is {}'.format(a_min, a_max, ag.compute_loss_mf(act, a_min, a_max)))
     print('MSE of weight with w_min {} w_max {} is {}'.format(w_min, w_max, MSE(weight_float_tensor, w_min, w_max)))
     
     
     #######################
     #### ocs - overwite min/max here after ocs implementaion
-    weights_splitted, in_channels_to_split = ocs.ocs_wts(weight_float_tensor)
+    abs_max_wt  = np.max(np.abs([w_min, w_max]))
+    w_scale = 127/abs_max_wt
+    weights_splitted, in_channels_to_split = ocs.ocs_wts(weight_float_tensor, 0) #w_scale)
 
     print('weights_splitted', weights_splitted)
     print('in_channels_to_split', in_channels_to_split)
     print('weights_splitted shape',weights_splitted.shape[0], weights_splitted.shape[1] )
+
+    # np.save('weights_splitted', weights_splitted)
 
     # act_splitted = act_split(act, in_channels_to_split)
     # print('act_splitted shape', act_splitted.shape[0], act_splitted.shape[1])
@@ -140,15 +145,31 @@ def generate_const(gr, all_const, _node_infor, clip_method, a_min, a_max ):
     # a_max = np.max(act)
     w_min = np.min(weights_splitted)
     w_max = np.max(weights_splitted)
-    print('MSE of activation with a_min {} a_max {} is {}'.format(a_min, a_max, ag.compute_loss_tf(act, a_min, a_max)))
-    print('MSE of weight with w_min {} w_max {} is {}'.format(w_min, w_max, MSE(weights_splitted, w_min, w_max)))
-    
-
- 
+     
     # abs_max_act = np.max(np.abs([a_min, a_max]))
     abs_max_wt  = np.max(np.abs([w_min, w_max]))
     # weight_qint8_tensor = (np.around(weight_float_tensor*127/abs_max_wt)).astype(np.int8)
-    weight_qint8_tensor = (np.around(weights_splitted*127/abs_max_wt)).astype(np.int8)
+    with tf.compat.v1.Session() as sess:
+        quantize_op = tf.compat.v1.quantize(
+            weights_splitted,
+            w_min,
+            w_max,
+            dtypes.qint8,
+            mode=b'SCALED')
+        weight_qint8_tensor = quantize_op[0].eval()
+        # w_min = quantize_op[1].eval()
+        # w_max = quantize_op[2].eval()
+    print('MSE of activation with a_min {} a_max {} is {}'.format(a_min, a_max, ag.compute_loss_mf(act, a_min, a_max)))
+    print('MSE of weight with w_min {} w_max {} is {}'.format(w_min, w_max, MSE(weights_splitted, w_min, w_max)))
+    
+    print('weight_qint8_tensor:', weight_qint8_tensor)
+    print('min_value', w_min)
+    print('max_value', w_max)
+
+    # sess = session.Session()
+    # with sess.as_default():
+        
+    # weight_qint8_tensor = (np.around(weights_splitted*127/abs_max_wt)).astype(np.int8)
     
  
 
