@@ -5,6 +5,7 @@ import numpy as np
 import tensorflow as tf
 from scipy.stats import entropy
 import argparse
+import kl_divergence
 
 
 def quantize_bins(P,NUM_QBINS):
@@ -71,6 +72,9 @@ def get_pos_threshold(H,NUM_QBINS,max_val, HE):
         res=[]
         res_edges=[]
         
+        print('NUM_QBINS ', NUM_QBINS)
+        print()
+        print()
         H = [float(i) for i in H]
         for i in range(NUM_QBINS,num_Pbins+1):
                 ref_distribution_P=H[0:(i)]
@@ -89,7 +93,7 @@ def get_pos_threshold(H,NUM_QBINS,max_val, HE):
             thresh_HE = HE[pos_idx]
             return(pos_idx, thresh_HE)
 	
-        #res[0] = 1
+        res[0] = 1
         min_kl=np.nanmin(res)
         pos_idx=np.argmin(res)
         
@@ -132,7 +136,7 @@ def get_neg_threshold(H,NUM_QBINS,min_val,HE):
             thresh_HE = HE[neg_idx]
             return(neg_idx, thresh_HE)
                                                         
-
+        res[0] = 1
         min_kl=np.nanmin(res)
         neg_idx=np.argmin(res)
         
@@ -193,6 +197,22 @@ def get_symmetric_threshold(H_orig,NUM_QBINS,max_val,min_val,HE,HE_orig):
     
 
 def get_threshold(arr, bins, NUM_QBINS):
+    
+    hist, hist_edges = np.histogram(arr, bins)
+    hist_edges_min = np.min(hist_edges)
+    hist_edges_max = np.max(hist_edges)
+    hist_len = len(hist)
+    zero_bin = int((-hist_edges_min * hist_len) / (hist_edges_max - hist_edges_min))
+    print('zero_bin', zero_bin)
+    kl = kl_divergence.KL_Divergence()
+    th = kl.get_threshold(hist, hist_edges, hist_edges_min, hist_edges_max, bins, "uint8", 255)
+    # a_max, a_min, idx = get_symmetric_threshold(hist, NUM_QBINS, hist_edges_max,
+    #                                                hist_edges_min, hist_edges[zero_bin:], hist_edges)
+    # print('index :', idx)                                                   
+    # return (a_max, a_min)  
+    return(-th, th)
+
+def get_threshold_sym(arr, bins, NUM_QBINS):
     hist, hist_edges = np.histogram(arr, bins)
     hist_edges_min = np.min(hist_edges)
     hist_edges_max = np.max(hist_edges)
@@ -201,7 +221,35 @@ def get_threshold(arr, bins, NUM_QBINS):
     a_max, a_min, idx = get_symmetric_threshold(hist, NUM_QBINS, hist_edges_max,
                                                    hist_edges_min, hist_edges[zero_bin:], hist_edges)
     print('index :', idx)                                                   
-    return (a_max, a_min)                                                   
+    return (a_max, a_min)  
+
+def get_threshold_asym(arr, bins, NUM_QBINS):
+    hist, hist_edges = np.histogram(arr, bins)
+    hist_edges_min = np.amin(hist_edges)
+    hist_edges_max = np.amax(hist_edges)
+    hist_len = len(hist)
+    zero_bin = int((-hist_edges_min * hist_len) / (hist_edges_max - hist_edges_min))
+    H_pos=hist[zero_bin:]
+    H_neg=hist[0:zero_bin]
+    print('hist_edges_min', hist_edges_min)
+    print('hist_edges_max', hist_edges_max)
+    print('zero_bin', zero_bin)
+    print('hist_len', hist_len)
+
+    pos_idx, pos_threshold = get_pos_threshold(H_pos,
+                                                            NUM_QBINS//2,
+                                                            hist_edges_max, 
+                                                            hist_edges[zero_bin:])
+
+    neg_idx, neg_threshold = get_neg_threshold(H_neg,
+                                                            NUM_QBINS//2,
+                                                            hist_edges_min, 
+                                                            hist_edges[0:zero_bin+1])
+
+    
+    print('pos_idx and  pos_threshold are:', pos_idx, pos_threshold)                                                   
+    print('neg_idx and  neg_threshold are:', neg_idx, neg_threshold)
+    return (pos_threshold, neg_threshold)  
 
 '''
 
@@ -305,3 +353,4 @@ idx = zero_bin - NUM_BINS
 #np.save('pos_neg_threshold', thresholds)
 np.save(args.output, thresholds)
 '''
+

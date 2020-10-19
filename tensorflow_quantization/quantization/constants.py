@@ -47,9 +47,9 @@ def act_split(act, in_channels_to_copy):
 
     return (act_split_r)
 
-def generate_const(gr, all_const, _node_infor, clip_method, a_min, a_max ):
+def generate_const(gr, all_const, _node_infor, clip_method): #, a_min, a_max ):
 
-    act = np.load('../../work_dir/bd/activations.npy')
+    act = np.load('/home/pid/workhere/intelAI/tools/activations.npy')
     print(act.shape)
     matmul_weight_name = all_const["weight_node_name"]
     bias_name= all_const["bias_node_name"]
@@ -62,10 +62,12 @@ def generate_const(gr, all_const, _node_infor, clip_method, a_min, a_max ):
     a_max = np.max(act)
     w_min = np.min(weight_float_tensor)
     w_max = np.max(weight_float_tensor)
-
+    print('MSE of activation with a_min {} a_max {} is {}'.format(a_min, a_max, ag.compute_loss_tf(act, a_min, a_max)))
+    print('MSE of weight with w_min {} w_max {} is {}'.format(w_min, w_max, MSE(weight_float_tensor, w_min, w_max)))
+    
     if (clip_method == "kl"):
         # clip activation and weight
-        a_max, a_min = KL.get_threshold(act, 1001, 256)        
+        a_max, a_min = KL.get_threshold_sym(act, 1000, 256)        
         # w_max, w_min = KL.get_threshold(weight_float_tensor, 1001, 256) 
         
         # result 
@@ -82,7 +84,7 @@ def generate_const(gr, all_const, _node_infor, clip_method, a_min, a_max ):
         # w_min and w_max -0.4037606082596145 0.3738432779655114 , MSE -  9.95771682321469e-06
         # MSE = 1.4419837e-05
     elif (clip_method == 'hist_brute'):
-        hist_brute_act = l2norm.HistMethods(act, 201, 256)
+        hist_brute_act = l2norm.HistMethods(act, 501, 256)
         a_min, a_max = hist_brute_act.hist_brute()
         # hist_brute_wt = l2norm.HistMethods(weight_float_tensor, 1001, 256)
         # w_min, w_max = hist_brute_wt.hist_brute()
@@ -97,8 +99,12 @@ def generate_const(gr, all_const, _node_infor, clip_method, a_min, a_max ):
         # w_min = -w_max
 
     elif (clip_method == 'gs'):
-        a_min, a_max = ag.find_clip_greedy_search_1(act, 200, 0.16)
+        a_min, a_max = ag.find_clip_greedy_search_1(act, 100, 0.16)
         # w_min, w_max = ag.find_clip_greedy_search(weight_float_tensor, 200, 0.16)
+
+    elif (clip_method == "mmse"):
+        a_min, a_max = ag.find_clip_mmse(act, 8)
+        w_min, w_max = ag.find_clip_mmse(weight_float_tensor, 8)
 
     # a_min = -1.64317
     # a_max = 1.64317
@@ -106,8 +112,8 @@ def generate_const(gr, all_const, _node_infor, clip_method, a_min, a_max ):
     #a_max = 2.51301
     # a_min = -1.43055913925171   
     # a_max =  3.8148243713378944
-    a_min = -2.080813293457033
-    a_max = 5.722236557006824
+    # a_min = -2.080813293457033
+    # a_max = 5.722236557006824
     # a_min = -1.907412185668947
     # a_max = 5.93898794174193
 
@@ -122,8 +128,8 @@ def generate_const(gr, all_const, _node_infor, clip_method, a_min, a_max ):
     print ('w_min and w_max', w_min, w_max)
     
     #print('MSE of activation with a_min {} a_max {} is {}'.format(a_min, a_max, MSE(act, a_min, a_max)))
-    print('MSE of activation with a_min {} a_max {} is {}'.format(a_min, a_max, ag.compute_loss_mf(act, a_min, a_max)))
-    print('MSE of weight with w_min {} w_max {} is {}'.format(w_min, w_max, MSE(weight_float_tensor, w_min, w_max)))
+    # print('MSE of activation with a_min {} a_max {} is {}'.format(a_min, a_max, ag.compute_loss_mf(act, a_min, a_max)))
+    # print('MSE of weight with w_min {} w_max {} is {}'.format(w_min, w_max, MSE(weight_float_tensor, w_min, w_max)))
     
     
     #######################
@@ -132,9 +138,9 @@ def generate_const(gr, all_const, _node_infor, clip_method, a_min, a_max ):
     w_scale = 127/abs_max_wt
     weights_splitted, in_channels_to_split = ocs.ocs_wts(weight_float_tensor, 0) #w_scale)
 
-    print('weights_splitted', weights_splitted)
+    # print('weights_splitted', weights_splitted)
     print('in_channels_to_split', in_channels_to_split)
-    print('weights_splitted shape',weights_splitted.shape[0], weights_splitted.shape[1] )
+    # print('weights_splitted shape',weights_splitted.shape[0], weights_splitted.shape[1] )
 
     # np.save('weights_splitted', weights_splitted)
 
@@ -143,12 +149,13 @@ def generate_const(gr, all_const, _node_infor, clip_method, a_min, a_max ):
 
     # a_min = np.min(act)
     # a_max = np.max(act)
-    w_min = np.min(weights_splitted)
-    w_max = np.max(weights_splitted)
+    #w_min = np.min(weights_splitted)
+    #w_max = np.max(weights_splitted)
+    # print ('w_min and w_max', w_min, w_max)
      
     # abs_max_act = np.max(np.abs([a_min, a_max]))
     abs_max_wt  = np.max(np.abs([w_min, w_max]))
-    # weight_qint8_tensor = (np.around(weight_float_tensor*127/abs_max_wt)).astype(np.int8)
+    # weight_qint8_tensor = (np.around(weights_splitted*127/abs_max_wt)).astype(np.int8)
     with tf.compat.v1.Session() as sess:
         quantize_op = tf.compat.v1.quantize(
             weights_splitted,
@@ -159,12 +166,12 @@ def generate_const(gr, all_const, _node_infor, clip_method, a_min, a_max ):
         weight_qint8_tensor = quantize_op[0].eval()
         # w_min = quantize_op[1].eval()
         # w_max = quantize_op[2].eval()
-    print('MSE of activation with a_min {} a_max {} is {}'.format(a_min, a_max, ag.compute_loss_mf(act, a_min, a_max)))
+    print('MSE of activation with a_min {} a_max {} is {}'.format(a_min, a_max, ag.compute_loss_tf(act, a_min, a_max)))
     print('MSE of weight with w_min {} w_max {} is {}'.format(w_min, w_max, MSE(weights_splitted, w_min, w_max)))
     
-    print('weight_qint8_tensor:', weight_qint8_tensor)
-    print('min_value', w_min)
-    print('max_value', w_max)
+    # print('weight_qint8_tensor:', weight_qint8_tensor)
+    # print('min_value', w_min)
+    # print('max_value', w_max)
 
     # sess = session.Session()
     # with sess.as_default():

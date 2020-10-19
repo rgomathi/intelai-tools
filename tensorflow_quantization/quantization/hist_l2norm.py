@@ -7,6 +7,7 @@ class HistMethods:
         self.dst_nbins = dst_nbins
 
         self.histogram, _ = np.histogram(fp32_arr, self.bins)
+        print('len of histogram', len(self.histogram))
         self.min_val = np.min(fp32_arr)
         self.max_val = np.max(fp32_arr)
         self.bin_width = (self.max_val - self.min_val) / self.bins
@@ -63,9 +64,9 @@ class HistMethods:
             # end of src_bin
             src_bin_begin = (src_bin - next_start_bin) * self.bin_width
             src_bin_end = src_bin_begin + self.bin_width
-            print('src_bin :', src_bin)
-            print('src_bin_begin :', src_bin_begin)
-            print('src_bin_end :', src_bin_end)
+            # print('src_bin :', src_bin)
+            # print('src_bin_begin :', src_bin_begin)
+            # print('src_bin_end :', src_bin_end)
 
             # which dst_bins the beginning and end of src_bin belong to?
             dst_bin_of_begin = np.clip(src_bin_begin // dst_bin_width, 0, self.dst_nbins - 1)
@@ -73,10 +74,10 @@ class HistMethods:
 
             dst_bin_of_end = np.clip(src_bin_end // dst_bin_width, 0, self.dst_nbins - 1)
             dst_bin_of_end_center = (dst_bin_of_end + 0.5) * dst_bin_width
-            print('dst_bin_of_begin :', dst_bin_of_begin)
-            print('dst_bin_of_begin_center :', dst_bin_of_begin_center)
-            print('dst_bin_of_end :', dst_bin_of_end)
-            print('dst_bin_of_end_center :', dst_bin_of_end_center)
+            # print('dst_bin_of_begin :', dst_bin_of_begin)
+            # print('dst_bin_of_begin_center :', dst_bin_of_begin_center)
+            # print('dst_bin_of_end :', dst_bin_of_end)
+            # print('dst_bin_of_end_center :', dst_bin_of_end_center)
 
             density = self.histogram / self.bin_width
             # print('self.bin_width', self.bin_width)
@@ -86,8 +87,8 @@ class HistMethods:
 
             delta_begin = src_bin_begin - dst_bin_of_begin_center
             delta_end = dst_bin_width / 2
-            print('delta_begin :', delta_begin)
-            print('delta_end :', delta_end)
+            # print('delta_begin :', delta_begin)
+            # print('delta_end :', delta_end)
 
             norm += self.get_norm(delta_begin, delta_end, density)
 
@@ -119,7 +120,7 @@ class HistMethods:
         total = sum(self.histogram)
         cSum = np.cumsum(self.histogram, axis=0)
 
-        stepsize = 1e-5  # granularity
+        stepsize = 1e-7  # granularity
         alpha = 0.0  # lower bound
         beta = 1.0  # upper bound
         start_bin = 0
@@ -247,7 +248,7 @@ class HistMethods:
         total = sum(self.histogram)
         cSum = np.cumsum(self.histogram, axis=0)
 
-        stepsize = 1e-5  # granularity
+        stepsize = 1e-7  # granularity
         alpha = 0.0  # lower bound
         beta = 1.0  # upper bound
         start_bin = 0

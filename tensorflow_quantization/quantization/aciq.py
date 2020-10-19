@@ -2,7 +2,7 @@ import numpy as np
 import tensorflow as tf
 # from tensorflow.python.ops.gen_math_ops import quantize, dequantize
 
-def quantize(x, num_bits, alpha):
+def quantize(x, alpha):
     min_q_val = -127, 
     max_q_val = 127
     scale = 127/alpha
@@ -10,14 +10,22 @@ def quantize(x, num_bits, alpha):
     x = q/scale
     return x
 
-def mse_histogram_clip(bin_x, bin_y, num_bits, alpha):
+def mse_histogram_clip(bin_x, bin_y, alpha):
    # Clipping error: sum over bins outside the clip threshold
    idx = np.abs(bin_x) > alpha
+#    print('alpha ', alpha)
+#    print('idx ', idx)
+#    print('bin_x[idx] ', bin_x[idx])
    mse = np.sum((np.abs(bin_x[idx]) - alpha)**2 * bin_y[idx])
+#    print('(np.abs(bin_x[idx]) - alpha)**2 ', (np.abs(bin_x[idx]) - alpha)**2)
+#    print('(np.abs(bin_x[idx]) - alpha)**2 * bin_y[idx] ', (np.abs(bin_x[idx]) - alpha)**2 * bin_y[idx])
+#    print('mse ', mse)
    # Quantization error: sum over bins inside the clip threshold
    idx = np.abs(bin_x) <= alpha
-   bin_xq = quantize(bin_x[idx], num_bits, alpha)
+   bin_xq = quantize(bin_x[idx], alpha)
    mse += np.sum((bin_x[idx] - bin_xq)**2 * bin_y[idx])
+#    print('(bin_x[idx] - bin_xq)**2 * bin_y[idx] ', (bin_x[idx] - bin_xq)**2 * bin_y[idx])
+#    print('mse ', mse)
    return mse
 
 #-------------------------------------------------------------------------
@@ -42,21 +50,81 @@ def find_clip_aciq(values, num_bits):
     # Laplacian clip
     b = np.mean(np.abs(values - np.mean(values)))
     alpha_l = alpha_laplace[num_bits] * b
+    print('sigma ', sigma)
+    print('alpha_g ', alpha_g)
+    print('b ', b)
+    print('alpha_l', alpha_l)
 
     # Build histogram
     max_abs = np.max(np.abs(values))
     bin_range = (-max_abs, max_abs)
-    bin_y, bin_edges = np.histogram(values, bins=1001, range=bin_range,
+    bin_range = (np.min(values), np.max(values))
+    print('bin_range ', bin_range)
+    bin_y, bin_edges = np.histogram(values, bins=101, range=bin_range,
                                     density=True)
     bin_x = 0.5*(bin_edges[:-1] + bin_edges[1:])
+    print('bin_edges ', bin_edges)
+    print('bin_x ', bin_x)
+    print('bin_y ', bin_y)
 
     # Pick the best fitting distribution
-    mse_gauss = mse_histogram_clip(bin_x, bin_y, num_bits, alpha_g)
-    mse_laplace = mse_histogram_clip(bin_x, bin_y, num_bits, alpha_l)
+    mse_gauss = mse_histogram_clip(bin_x, bin_y,  alpha_g)
+    mse_laplace = mse_histogram_clip(bin_x, bin_y,  alpha_l)
+    print('mse_gauss', mse_gauss)
+    print('mse_laplace ', mse_laplace)
 
     alpha_best = alpha_g if mse_gauss < mse_laplace else alpha_l
     print(" ACIQ alpha_best = %7.4f / %7.4f" % (alpha_best, max_abs))
     return alpha_best
+
+
+def find_clip_mmse(values, num_bits):
+    # Build histogram
+    # max_abs = np.max(np.abs(values))
+    bin_y, bin_edges = np.histogram(values, bins=1001, density=True)
+    # print('bin_edges ', bin_edges)
+    # print('bin_y ', bin_y)
+    # print('np.sum(bin_y) ', np.sum(bin_y))
+    bin_x = 0.5*(bin_edges[:-1] + bin_edges[1:])
+    bin_y /= np.sum(bin_y)
+    
+    # print('bin_x ', bin_x)
+    # print('bin_y ', bin_y)
+    # split positive and negative seperately
+    hist_edges_min = np.min(bin_edges)
+    hist_edges_max = np.max(bin_edges)
+    hist_len = len(bin_y)
+    zero_bin = int((-hist_edges_min * hist_len) / (hist_edges_max - hist_edges_min))
+    print('hist_len ', hist_len)
+    print('zero_bin', zero_bin)
+    
+
+    alphas = np.arange(0.01, 1, 0.01) * hist_edges_max
+    print('len of alphas ', len(alphas))
+    # print('alphas ', alphas)
+    mses_pos = [ mse_histogram_clip(bin_x[zero_bin:], bin_y[zero_bin:], alpha)
+                 for alpha in alphas ]
+    alpha_best_max = alphas[np.argmin(mses_pos)]
+
+    # alphas = np.arange(0.01, 1, 0.01)
+    # alphas = alphas[::-1]*-hist_edges_min
+    alphas = np.arange(0.01, 1, 0.01) * -hist_edges_min
+    # print('alphas ', alphas)
+    # bin_x_r = np.array(tuple(reversed(bin_x[:zero_bin])))
+    # bin_y_r = np.array(tuple(reversed(bin_y[:zero_bin])))
+    bin_x_r = np.flip(bin_x[:zero_bin])
+    bin_y_r = np.flip(bin_y[:zero_bin])
+   
+    # print('bin_x_r ', bin_x_r)
+    # print('bin_y_r ', bin_y_r)
+    mses_neg = [ mse_histogram_clip(bin_x_r, bin_y_r, alpha)
+                 for alpha in alphas ]
+    print('mses_pos ', len(mses_pos))
+    print('mses_neg ', len(mses_neg))
+    alpha_best_min = alphas[np.argmin(mses_neg)]
+
+    print(" alpha_best_max and alpha_best_min are",alpha_best_max, -alpha_best_min)
+    return -alpha_best_min, alpha_best_max
 
 
 
@@ -108,6 +176,7 @@ def compute_loss_tf(x, xmin, xmax):
     # dq = qd_mf(x, scale, xmin)
     # loss = np.square(np.subtract(x, dq)).mean()
     # print('In comput loss :', loss)
+     
     graph =tf.Graph()
     with graph.as_default():
         q_tf, min_tf, max_tf = tf.compat.v1.quantize(x, xmin, xmax, tf.quint8,  mode='MIN_FIRST')
@@ -207,7 +276,7 @@ def find_clip_greedy_search_1(x, bins, r):
         cur_max = stepsize
         while cur_max < xmax:
             i+=1
-            loss_new = compute_loss_mf(x, cur_min, cur_max)
+            loss_new = compute_loss_tf(x, cur_min, cur_max)
             # print('cur_min:', cur_min)
             # print('cur_max:', cur_max)        
             # print('new_loss:', loss_new)

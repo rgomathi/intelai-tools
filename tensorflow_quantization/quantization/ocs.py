@@ -6,6 +6,7 @@ def ocs_wts(weights, w_scale):
     num_channels = weights.shape[0]
     print('num_channel', num_channels)
     ocs_channels = int(np.ceil(0.1 * num_channels))
+    ocs_channels = 0
     print('ocs_channels', ocs_channels)
     
     # Which act channels to copy
@@ -30,7 +31,7 @@ def ocs_wts(weights, w_scale):
         ch_slice_half = ch_slice / 2.
         ch_slice_zero = np.zeros_like(ch_slice)
         split_value = np.max(ch_slice) * split_threshold
-        print('split_value', split_value)
+        # print('split_value', split_value)
 
         # ch_slice_1 = np.where(np.abs(ch_slice) > split_value, ch_slice_half, ch_slice)
         # ch_slice_2 = np.where(np.abs(ch_slice) > split_value, ch_slice_half, ch_slice_zero)

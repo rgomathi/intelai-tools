@@ -26,14 +26,15 @@ matmul_1_5_cfg={
                                  "node_info_categary":"split_fuse_matmul",    
                                  #"range_preset_max":6.5462027,       
                                  #"range_preset_min":-2.123853
-                                 "range_preset_max":4.51301,       
-                                 "range_preset_min":-1.64317,
+                                #  "range_preset_max":4.51301,       
+                                #  "range_preset_min":-1.64317,
                                 #  "clip_method":"kl",
                                 #  "clip_method":"hist_apprx" 
                                 #  "clip_method":"hist_brute" 
                                 #  "clip_method":"aciq" 
                                 # "clip_method":"gs" 
-                                 "clip_method" : "None"
+                                "clip_method":"mmse" 
+                                #  "clip_method" : "None"
                              }
 fc_cfg_setting = { 
 #                    "matmul_tb" :  matmul_tb_cfg,

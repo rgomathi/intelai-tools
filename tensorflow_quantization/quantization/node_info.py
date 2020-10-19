@@ -307,7 +307,7 @@ def get_nodes_control_pannel(gr, fc_cfg):
                                             }
                 }
                
-    generate_const(gr, all_const, _node_infor, fc_cfg["clip_method"], fc_cfg["range_preset_min"], fc_cfg["range_preset_max"])
+    generate_const(gr, all_const, _node_infor, fc_cfg["clip_method"]) #, fc_cfg["range_preset_min"], fc_cfg["range_preset_max"])
     #if 'PRESET' in str(fc_cfg["range_mode"]):
         #print("===> Optimizing for PRESET mode. <===")
         #nv = _node_infor["const_a"]["const_v"] * fc_cfg["range_preset_min"]
