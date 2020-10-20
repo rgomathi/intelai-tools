@@ -49,6 +49,8 @@ from tensorflow.python.platform import flags as flags_lib
 from tensorflow.python.platform import gfile
 from google.protobuf import text_format
 from nodes_editor  import  get_nodes_control_pannel 
+import aciq as ag
+from constants import MSE
 
 flags = flags_lib
 FLAGS = flags.FLAGS
@@ -71,7 +73,7 @@ flags.DEFINE_string("mode", "round",
 flags.DEFINE_string("test_input_dims", "1,224,224,3",
                     """The size of the input tensor to use when testing a"""
                     """ graph loaded from a file.""")
-flags.DEFINE_boolean("strip_redundant_quantization", True,
+flags.DEFINE_boolean("strip_redundant_quantization",True,
                      """Removes redundant dequantize/quantize pairs.""")
 flags.DEFINE_boolean("quantized_input", False,
                      "If true, assume Placeholders are quantized with values "
@@ -104,6 +106,8 @@ flags.DEFINE_string("excluded_nodes", "",
 flags.DEFINE_boolean("per_channel", False,
                      "If true weights will be quantized per-output-channel for Conv2D"
                      "and its fusions.")
+flags.DEFINE_boolean("refine_node", False,
+                    "If true, matmul fusion will be refined for accuracy using activation.")
 
 
 def print_input_nodes(current_node, nodes_map, indent, already_visited):
@@ -385,11 +389,41 @@ def intel_cpu_quantize_weight_eightbit(parent, input_node,
 
     This function creates (i) a quantized constant node, (ii) a float min node
     (iii) a float max node, and (iv) a dequantize node."""
+
     base_name = input_node.name + "_"
     qint8_const_name = base_name + "qint8_const"
     min_name = base_name + "min"
     max_name = base_name + "max"
     float_tensor = tensor_util.MakeNdarray(input_node.attr["value"].tensor)
+    # if refine_node:
+        # # get the min/max from clipping algorithm and use that for weight quantization
+        # min_value, max_value = ag.find_clip_mmse(float_tensor, 8)
+        
+        # sess = session.Session()
+        # with sess.as_default():
+        #    quantize_op = array_ops.quantize_v2(float_tensor,
+        #                                    min_value,
+        #                                    max_value,
+        #                                    dtypes.qint8,
+        #                                    mode=quantization_mode,
+        #                                    round_mode="HALF_TO_EVEN")
+        #    qint8_tensor = quantize_op[0].eval()
+        #    # Updated min-max values should be passed to the next feeding node.
+        # #    min_value = quantize_op[1].eval()
+        # #    max_value = quantize_op[2].eval()
+
+        # shape = tensor_util.TensorShapeProtoToList(input_node.attr["value"]
+        #                                         .tensor.tensor_shape)
+        # qint8_const_node = create_constant_node(
+        #     qint8_const_name, qint8_tensor,
+        #     dtypes.qint8,
+        #     shape=shape)
+        # min_node = create_constant_node(min_name, min_value, dtypes.float32)
+        # max_node = create_constant_node(max_name, max_value, dtypes.float32)
+        # return [qint8_const_node, min_node, max_node]
+        # return None
+    
+    
     epsilon = 1e-4  # Needs to be set empirically if accuracy is not satisfactory
     if parent == "Conv2D":
         if per_channel:
@@ -453,22 +487,22 @@ def intel_cpu_quantize_weight_eightbit(parent, input_node,
         # get the shape back to 4 dim
         qint8_tensor = qint8_tensor.reshape(a, b, c, d)
     elif parent == "MatMul":
-       min_value = np.min(float_tensor.flatten())
-       max_value = np.max(float_tensor.flatten())
-       # Same processing of min-max as in quantize_weight_eightbit
-       # function.
-       if min_value > 0.0:
-          min_value = 0.0
-       if min_value == max_value:
-           if abs(min_value) < 0.000001:
-               max_value = min_value + 1.0
-           elif min_value > 0:
-               max_value = 2 * min_value
-           else:
-               max_value = min_value / 2.0
+        min_value = np.min(float_tensor.flatten())
+        max_value = np.max(float_tensor.flatten())
+        # Same processing of min-max as in quantize_weight_eightbit
+        # function.
+        if min_value > 0.0:
+            min_value = 0.0
+        if min_value == max_value:
+            if abs(min_value) < 0.000001:
+                max_value = min_value + 1.0
+            elif min_value > 0:
+                max_value = 2 * min_value
+            else:
+                max_value = min_value / 2.0
 
-       sess = session.Session()
-       with sess.as_default():
+        sess = session.Session()
+        with sess.as_default():
            quantize_op = array_ops.quantize_v2(float_tensor,
                                            min_value,
                                            max_value,
@@ -511,7 +545,8 @@ class GraphRewriter(object):
                  intel_cpu_eightbitize=False,
                  excluded_ops=[],
                  excluded_nodes=[],
-                 per_channel=False):
+                 per_channel=False,
+                 refine_node=False):
         """Sets up the class to rewrite a float graph.
 
         Args:
@@ -573,6 +608,7 @@ class GraphRewriter(object):
 
         # Data that is valid only during the recursive call to rewrite the graph.
         self.state = None
+        self.refine_node = refine_node
 
     def create_nodes_map(self, graph):
         """Builds a mapping of node names to their defs from the graph."""
@@ -765,6 +801,8 @@ class GraphRewriter(object):
                         [output_node, None, False, False])
                     self.intel_cpu_eightbitize_nodes_recursively(output_node)
                     self.state.output_node_stack.pop()
+                # if FLAGS.refine_node:
+                #     FLAGS.strip_redundant_quantization = False
             else:
                 for output_node in output_nodes:
                     self.eightbitize_nodes_recursively(output_node)
@@ -787,8 +825,9 @@ class GraphRewriter(object):
                                          self.fallback_quantization_range[1],
                                          dtypes.float32, []))
             if FLAGS.strip_redundant_quantization:
-                self.output_graph = self.remove_redundant_quantization(
-                    self.output_graph)
+                if not FLAGS.refine_node:
+                    self.output_graph = self.remove_redundant_quantization(
+                        self.output_graph)
                 self.remove_dead_nodes(output_node_names)
             self.apply_final_node_renames()
         elif self.mode == "weights":
@@ -1136,21 +1175,187 @@ class GraphRewriter(object):
                                                           dequantize_node_name,
                                                           requantize_dtype)
 
+    def intel_cpu_eightbitize_matmul_refine_node(self, original_node, bias_node=None,
+                                          bias_add_name=None, add_node_name=None,
+                                          relu_node_name=None):
+        """Replaces a matmul node with the eight bit equivalent sub-graph."""
+        namespace_prefix = original_node.name + "_eightbit"
+        
+
+        # # Use the name of the first input as the control input name
+        # # for reshape_dim and reduction_dim to slove the different frame issue
+        # # in quantized graph
+        # reshape_dims_name, reduction_dims_name = self.add_common_quantization_nodes(
+        #     namespace_prefix, node_name_from_input(original_node.input[0]))
+
+        
+        input_names = []
+        min_max_names = []
+        
+        unique_input_name = unique_node_name_from_input(original_node.input[0])
+
+        min_input_name = namespace_prefix + "_min_" + unique_input_name
+        max_input_name = namespace_prefix + "_max_" + unique_input_name
+        quantize_input_name = namespace_prefix + "_quantize_" + unique_input_name
+
+        # Fix min/max of activation sample using clipping algorithm
+        act = np.load('../../work_dir/bd/activations.npy')
+       
+        a_min, a_max = ag.find_clip_mmse(act, 8)
+        min_node = create_constant_node(min_input_name, a_min, dtypes.float32)
+        max_node = create_constant_node(max_input_name, a_max, dtypes.float32)
+        
+        act_node = original_node.input[0]
+        print('act_node', act_node)
+        act_node_name = node_name_from_input(act_node)
+        print('act_node_name', act_node_name)
+        quantize_input_node = create_node(
+            "QuantizeV2", quantize_input_name,
+            [act_node_name, min_input_name, max_input_name])
+        set_attr_dtype(quantize_input_node, "T", dtypes.quint8)
+        set_attr_string(quantize_input_node, "mode", b"MIN_FIRST")
+        set_attr_string(quantize_input_node, "round_mode", b"HALF_AWAY_FROM_ZERO")
+        
+        self.add_output_graph_node(quantize_input_node)
+        self.add_output_graph_node(min_node)
+        self.add_output_graph_node(max_node)
+        min_output_name = quantize_input_name + ":1"
+        max_output_name = quantize_input_name + ":2"        
+
+        self.quantized_node_dict[unique_input_name] = (quantize_input_name,
+                                                       min_output_name, max_output_name)
+        all_input_names = []
+        all_input_names.append(quantize_input_name)
+
+        # get the min/max from clipping algorithm and use that for weight quantization
+        weight_node_name = original_node.input[1]
+        weight_node = self.nodes_map[weight_node_name]
+        # print('weight_node', weight_node)
+        wt_tensor = tensor_util.MakeNdarray(weight_node.attr["value"].tensor)   
+        w_min, w_max = ag.find_clip_mmse(wt_tensor, 8)
+        
+        sess = session.Session()
+        with sess.as_default():
+           quantize_op = array_ops.quantize_v2(wt_tensor,
+                                           w_min,
+                                           w_max,
+                                           dtypes.qint8,
+                                           mode=b'SCALED')
+                                        #    round_mode="HALF_TO_EVEN")
+           qint8_tensor = quantize_op[0].eval()
+           # Updated min-max values should be passed to the next feeding node.
+        #    min_value = quantize_op[1].eval()
+        #    max_value = quantize_op[2].eval()
+
+        print('MSE of activation with a_min {} a_max {} is {}'.format(a_min, a_max, ag.compute_loss_tf(act, a_min, a_max)))
+        print('MSE of weight with w_min {} w_max {} is {}'.format(w_min, w_max, MSE(wt_tensor, w_min, w_max)))
+
+        shape = tensor_util.TensorShapeProtoToList(weight_node.attr["value"]
+                                                .tensor.tensor_shape)
+        base_name = weight_node_name + "_"
+        qint8_const_name = base_name + "qint8_const"
+        min_name = base_name + "min"
+        max_name = base_name + "max"                                                
+        qint8_const_node = create_constant_node(
+            qint8_const_name, qint8_tensor,
+            dtypes.qint8,
+            shape=shape)
+        min_node = create_constant_node(min_name, w_min, dtypes.float32)
+        max_node = create_constant_node(max_name, w_max, dtypes.float32)
+        self.add_output_graph_node(qint8_const_node)
+        self.add_output_graph_node(min_node)
+        self.add_output_graph_node(max_node)
+        # all_input_names.extend(min_output_name)
+        # all_input_names.extend(max_output_name)
+        
+        # return quantize_input_name, min_output_name, max_output_name
+        
+        
+
+        all_input_names.append(qint8_const_name)
+
+        # calculate Bias compensation
+        
+        bias_tensor = tensor_util.MakeNdarray(bias_node.attr["value"].tensor)   
+        # compensated with B's32 = Q'a * Qw * Bf32 + Q'a * Min(Af32) * 1 *ws8.
+        QaAmin  = 255 * a_min / (a_max - a_min)
+        abs_max_wt  = np.max(np.abs([w_min, w_max]))
+        bias_scale = 255.0 * 127.0 / ((a_max - a_min) * abs_max_wt)
+        ws8_1 = np.sum(np.array(qint8_tensor, dtype=np.int32),axis=0,dtype=np.int32)
+        qint32_bias = np.around((bias_tensor * bias_scale) + (ws8_1*QaAmin))
+
+        bias_name = bias_node.name + "_"
+        qint32_bias_name = bias_name + "qint32_const"
+        shape = tensor_util.TensorShapeProtoToList(bias_node.attr["value"]
+                                                .tensor.tensor_shape)
+        qint32_const_node = create_constant_node(
+            qint32_bias_name, qint32_bias,
+            dtypes.qint32,
+            shape=shape)
+        self.add_output_graph_node(qint32_const_node)
+
+        all_input_names.append(qint32_bias_name)
+        all_input_names.append(min_output_name)
+        all_input_names.append(max_output_name)
+        all_input_names.append(min_name)
+        all_input_names.append(max_name)
+
+       
+        # all_input_names = self.add_eightbit_prologue_refine_nodes(original_node, bias_node)
+        print('all_input_names', all_input_names)
+
+        # only mm + biasAdd + relu supported
+
+        # if bias_node and relu_node_name:
+            # all_input_names = all_input_names[:2] + [bias_node.name] + \
+            #     all_input_names[2:]
+
+            # quantized_mat_mul_name = original_node.name + "_eightbit_quantized_mat_mul"
+        quantized_mat_mul_name = relu_node_name
+        quantized_mat_mul_node = create_node("QuantizedMatMulWithBiasAndReluAndDequantize",
+                                              quantized_mat_mul_name, all_input_names)
+            # """Setting First layer's quantization mode to MIN_FIRST"""
+            # if "hiddenlayer_0" in quantized_mat_mul_name:
+            #     set_attr_string(quantized_mat_mul_node, "input_quant_mode", b"MIN_FIRST")
+        
+        set_attr_dtype(quantized_mat_mul_node, "T1", dtypes.quint8)
+        set_attr_dtype(quantized_mat_mul_node, "T2", dtypes.qint8)
+        set_attr_dtype(quantized_mat_mul_node, "Toutput", dtypes.float32)
+        set_attr_dtype(quantized_mat_mul_node, "Tbias", dtypes.qint32)
+        copy_attr(quantized_mat_mul_node, "transpose_a",
+                  original_node.attr["transpose_a"])
+        copy_attr(quantized_mat_mul_node, "transpose_b",
+                  original_node.attr["transpose_b"])
+        set_attr_string(quantized_mat_mul_node, "input_quant_mode", b"MIN_FIRST")
+
+        self.add_output_graph_node(quantized_mat_mul_node)
+        # quantize_down_name = self.add_quantize_down_nodes(original_node,
+        #                                                   quantized_mat_mul_name)
+
+        # if bias_node and relu_node_name:
+        #     self.add_dequantize_result_node(quantize_down_name, relu_node_name)
+        # elif bias_node and bias_add_name and \
+        #         (not add_node_name) and (not relu_node_name):
+        #     self.add_dequantize_result_node(quantize_down_name, bias_add_name)
+        # else:
+        #     self.add_dequantize_result_node(quantize_down_name, original_node.name)
+
     # TODO(intel-tf): Quantized Matmul could be fused with few other succeeding
     # ops. Current support is for BiasAdd and Relu.
     def intel_cpu_eightbitize_matmul_node(self, original_node, bias_node=None,
                                           bias_add_name=None, add_node_name=None,
                                           relu_node_name=None):
         """Replaces a matmul node with the eight bit equivalent sub-graph."""
+        print('original_node name', original_node.name)
+        print('bias_node name', bias_node.name)
+        print('bias_add_name', bias_add_name)
+        print('add_node_name', add_node_name)
+        print('relu_node_name', relu_node_name)
         all_input_names = self.add_eightbit_prologue_nodes(original_node)
+        print('all_input_names', all_input_names)
 
-        if bias_node and add_node_name and relu_node_name:
-            all_input_names = all_input_names[:2] + [bias_node.name] + \
-                all_input_names[2:] + [add_node_name]
-            quantized_mat_mul_name = original_node.name + "_eightbit_quantized_mat_mul"
-            quantized_mat_mul_node = create_node("QuantizedMatMulWithBiasSumAndRelu",
-                                                 quantized_mat_mul_name, all_input_names)
-        elif bias_node and (not add_node_name) and relu_node_name:
+
+        if bias_node and relu_node_name:
             all_input_names = all_input_names[:2] + [bias_node.name] + \
                 all_input_names[2:]
 
@@ -1161,7 +1366,7 @@ class GraphRewriter(object):
             if "hiddenlayer_0" in quantized_mat_mul_name:
                 set_attr_string(quantized_mat_mul_node, "input_quant_mode", b"MIN_FIRST")
         elif bias_node and bias_add_name and \
-                (not add_node_name) and (not relu_node_name):
+                 (not relu_node_name):
             all_input_names = all_input_names[:2] + [bias_node.name] + \
                 all_input_names[2:]
 
@@ -1233,7 +1438,7 @@ class GraphRewriter(object):
         self.state.already_visited[current_node.name] = True
         quantize_input, should_quantize_conv, should_quantize_concat, should_quantize_matmul, \
             fuse_with_conv = (False, False, False, False, False)
-
+        # print('current_node', current_node)
         if current_node.op in ("Conv2D", "DepthwiseConv2dNative") \
                 and (current_node.op not in self.excluded_ops) \
                 and (current_node.name not in self.excluded_nodes):
@@ -1334,35 +1539,17 @@ class GraphRewriter(object):
             # match pattern for fusion with bias and relu for Wide&Deep
             grand_parent, parent = self.state.output_node_stack[-2:]
             if parent[0].op == "BiasAdd" and \
-                    (grand_parent[0].op == "Relu" or grand_parent[0].op == "Relu6"):
+                    (grand_parent[0].op == "Relu" ) :
                 self.state.output_node_stack[-2][3] = True  # BiasAdd to be fused
                 self.state.output_node_stack[-3][3] = True  # Relu to be fused
                 bias_node_name = node_name_from_input(parent[0].input[1])
                 bias_node = self.nodes_map[bias_node_name]
-                self.intel_cpu_eightbitize_matmul_node(current_node, bias_node, None,
+                if self.refine_node:
+                    self.intel_cpu_eightbitize_matmul_refine_node(current_node, bias_node, None,
                                                        None, grand_parent[0].name)
-            elif parent[0].op == "BiasAdd" and grand_parent[0].op in ("AddN", "Add"):
-                grand_grand_parent = self.state.output_node_stack[-3]
-                if grand_grand_parent[0].op in ("Relu", "Relu6") \
-                        and (not self.state.output_node_stack[-3][3]) \
-                        and (not self.state.output_node_stack[-4][3]):
-                    self.state.output_node_stack[-2][3] = True  # BiasAdd to be fused
-                    self.state.output_node_stack[-3][3] = True  # AddN to be fused
-                    self.state.output_node_stack[-4][3] = True  # Relu to be fused
-                    bias_node_name = node_name_from_input(parent[0].input[1])
-                    bias_node = self.nodes_map[bias_node_name]
-                    add_node_name = node_name_from_input(grand_parent[0].input[0])
-                    self.intel_cpu_eightbitize_matmul_node(current_node, bias_node, None,
-                                                           add_node_name,
-                                                           grand_grand_parent[0].name)
-                elif (not self.state.output_node_stack[-2][3]):  # Fuse BiasAdd then
-                    self.state.output_node_stack[-2][3] = True  # BiasAdd to be fused
-                    bias_node_name = node_name_from_input(parent[0].input[1])
-                    bias_node = self.nodes_map[bias_node_name]
-                    self.intel_cpu_eightbitize_matmul_node(current_node, bias_node,
-                                                           parent[0].name)
                 else:
-                    self.intel_cpu_eightbitize_matmul_node(current_node)
+                    self.intel_cpu_eightbitize_matmul_node(current_node, bias_node, None,
+                                                       None, grand_parent[0].name)
             elif parent[0].op == "BiasAdd" and \
                     (not self.state.output_node_stack[-2][3]):
                 self.state.output_node_stack[-2][3] = True  # BiasAdd to be fused
@@ -1399,9 +1586,10 @@ class GraphRewriter(object):
             # TODO(intel-tf): Cleanup model specific code
             # Quantization of constants for Wide and Deep
             elif parent[0].op == "MatMul" and parent[2] and FLAGS.model_name in ["wide_deep_large_ds"]:
-                for n in intel_cpu_quantize_weight_eightbit(parent[0].op, current_node,
+                if not self.refine_node:
+                    for n in intel_cpu_quantize_weight_eightbit(parent[0].op, current_node,
                                                             quantization_mode=b"SCALED", per_channel=False):
-                    self.add_output_graph_node(n)
+                        self.add_output_graph_node(n)
             else:
                 new_node = node_def_pb2.NodeDef()
                 new_node.CopyFrom(current_node)
@@ -1428,6 +1616,151 @@ class GraphRewriter(object):
                     self.output_nodes_map[node.name] = node
                 else:
                     raise ValueError("Duplicate node names detected.")
+
+    def add_eightbit_prologue_refine_nodes(self, original_node, bias_node):
+        """Adds input conversion nodes to handle quantizing the underlying node."""
+        namespace_prefix = original_node.name + "_eightbit"
+        
+
+        # # Use the name of the first input as the control input name
+        # # for reshape_dim and reduction_dim to slove the different frame issue
+        # # in quantized graph
+        # reshape_dims_name, reduction_dims_name = self.add_common_quantization_nodes(
+        #     namespace_prefix, node_name_from_input(original_node.input[0]))
+
+        
+        input_names = []
+        min_max_names = []
+        
+        unique_input_name = unique_node_name_from_input(original_node.input[0])
+
+        min_input_name = namespace_prefix + "_min_" + unique_input_name
+        max_input_name = namespace_prefix + "_max_" + unique_input_name
+        quantize_input_name = namespace_prefix + "_quantize_" + unique_input_name
+
+        # Fix min/max of activation sample using clipping algorithm
+        act = np.load('../../work_dir/bd/activations.npy')
+       
+        a_min, a_max = ag.find_clip_mmse(act, 8)
+        min_node = create_constant_node(min_input_name, a_min, dtypes.float32)
+        max_node = create_constant_node(max_input_name, a_max, dtypes.float32)
+        
+        act_node = original_node.input[0]
+        print('act_node', act_node)
+        act_node_name = node_name_from_input(act_node)
+        print('act_node_name', act_node_name)
+        quantize_input_node = create_node(
+            "QuantizeV2", quantize_input_name,
+            [act_node_name, min_input_name, max_input_name])
+        set_attr_dtype(quantize_input_node, "T", dtypes.quint8)
+        set_attr_string(quantize_input_node, "mode", b"MIN_FIRST")
+        set_attr_string(quantize_input_node, "round_mode", b"HALF_AWAY_FROM_ZERO")
+        
+        self.add_output_graph_node(quantize_input_node)
+        self.add_output_graph_node(min_node)
+        self.add_output_graph_node(max_node)
+        min_output_name = quantize_input_name + ":1"
+        max_output_name = quantize_input_name + ":2"        
+
+        self.quantized_node_dict[unique_input_name] = (quantize_input_name,
+                                                       min_output_name, max_output_name)
+        all_input_names = []
+        all_input_names.append(quantize_input_name)
+
+        # get the min/max from clipping algorithm and use that for weight quantization
+        weight_node_name = original_node.input[1]
+        weight_node = self.nodes_map[weight_node_name]
+        # print('weight_node', weight_node)
+        wt_tensor = tensor_util.MakeNdarray(weight_node.attr["value"].tensor)   
+        w_min, w_max = ag.find_clip_mmse(wt_tensor, 8)
+        
+        sess = session.Session()
+        with sess.as_default():
+           quantize_op = array_ops.quantize_v2(wt_tensor,
+                                           w_min,
+                                           w_max,
+                                           dtypes.qint8,
+                                           mode=b'SCALED')
+                                        #    round_mode="HALF_TO_EVEN")
+           qint8_tensor = quantize_op[0].eval()
+           # Updated min-max values should be passed to the next feeding node.
+        #    min_value = quantize_op[1].eval()
+        #    max_value = quantize_op[2].eval()
+
+        print('MSE of activation with a_min {} a_max {} is {}'.format(a_min, a_max, ag.compute_loss_tf(act, a_min, a_max)))
+        print('MSE of weight with w_min {} w_max {} is {}'.format(w_min, w_max, MSE(wt_tensor, w_min, w_max)))
+
+        shape = tensor_util.TensorShapeProtoToList(weight_node.attr["value"]
+                                                .tensor.tensor_shape)
+        base_name = weight_node_name + "_"
+        qint8_const_name = base_name + "qint8_const"
+        min_name = base_name + "min"
+        max_name = base_name + "max"                                                
+        qint8_const_node = create_constant_node(
+            qint8_const_name, qint8_tensor,
+            dtypes.qint8,
+            shape=shape)
+        min_node = create_constant_node(min_name, w_min, dtypes.float32)
+        max_node = create_constant_node(max_name, w_max, dtypes.float32)
+        self.add_output_graph_node(qint8_const_node)
+        self.add_output_graph_node(min_node)
+        self.add_output_graph_node(max_node)
+        # all_input_names.extend(min_output_name)
+        # all_input_names.extend(max_output_name)
+        
+        # return quantize_input_name, min_output_name, max_output_name
+        
+        
+
+        all_input_names.append(qint8_const_name)
+
+        # calculate Bias compensation
+        
+        bias_tensor = tensor_util.MakeNdarray(bias_node.attr["value"].tensor)   
+        # compensated with B's32 = Q'a * Qw * Bf32 + Q'a * Min(Af32) * 1 *ws8.
+        QaAmin  = 255 * a_min / (a_max - a_min)
+        abs_max_wt  = np.max(np.abs([w_min, w_max]))
+        bias_scale = 255.0 * 127.0 / ((a_max - a_min) * abs_max_wt)
+        ws8_1 = np.sum(np.array(qint8_tensor, dtype=np.int32),axis=0,dtype=np.int32)
+        qint32_bias = np.around((bias_tensor * bias_scale) + (ws8_1*QaAmin))
+
+        bias_name = bias_node.name + "_"
+        qint32_bias_name = bias_name + "qint32_const"
+        shape = tensor_util.TensorShapeProtoToList(bias_node.attr["value"]
+                                                .tensor.tensor_shape)
+        qint32_const_node = create_constant_node(
+            qint32_bias_name, qint32_bias,
+            dtypes.qint32,
+            shape=shape)
+        self.add_output_graph_node(qint32_const_node)
+
+        all_input_names.append(qint32_bias_name)
+        all_input_names.append(min_output_name)
+        all_input_names.append(max_output_name)
+        all_input_names.append(min_name)
+        all_input_names.append(max_name)
+
+        # for indx, original_input_name in enumerate(original_node.input):
+            
+        #     input_node_name = node_name_from_input(original_input_name)
+                            
+        #     quantize_input_name, min_input_name, max_input_name = (
+        #         self.eightbitize_input_to_node(namespace_prefix, original_input_name,
+        #                                        reshape_dims_name,
+        #                                        reduction_dims_name,
+        #                                        dtype=dtype))
+        #     input_names.append(quantize_input_name)
+        #     min_max_names.append(min_input_name)
+        #     min_max_names.append(max_input_name)
+        
+
+        # # add back control input name
+        # for original_input_name in original_node.input:
+        #     if original_input_name[0] == '^':
+        #         all_input_names.append(original_input_name)
+
+        return all_input_names
+                 
 
     def add_eightbit_prologue_nodes(self, original_node):
         """Adds input conversion nodes to handle quantizing the underlying node."""
@@ -1495,7 +1828,9 @@ class GraphRewriter(object):
                                   dtype=dtypes.quint8):
         """Takes one float input to an op, and converts it to quantized form."""
         unique_input_name = unique_node_name_from_input(original_input_name)
+        print('unique_input_name', unique_input_name)
         if unique_input_name in self.quantized_node_dict:
+            print('unique_input_name inside quantized_node_dict', unique_input_name)
             quantized_tuple = self.quantized_node_dict[unique_input_name]
             return quantized_tuple[0], quantized_tuple[1], quantized_tuple[2]
 
@@ -2261,7 +2596,8 @@ def main(unused_args):
                              excluded_ops=excluded_ops,
                              excluded_nodes=excluded_nodes,
                              intel_cpu_eightbitize=FLAGS.intel_cpu_eightbitize,
-                             per_channel=FLAGS.per_channel)
+                             per_channel=FLAGS.per_channel, 
+                             refine_node=FLAGS.refine_node)
 
     output_graph = rewriter.rewrite(FLAGS.output_node_names.split(","))
 
