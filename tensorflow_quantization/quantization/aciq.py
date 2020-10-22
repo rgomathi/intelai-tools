@@ -1,5 +1,8 @@
 import numpy as np
 import tensorflow as tf
+from tensorflow.python.client import session
+from tensorflow.python.framework import dtypes
+
 # from tensorflow.python.ops.gen_math_ops import quantize, dequantize
 
 def quantize(x, alpha):
@@ -189,6 +192,56 @@ def compute_loss_tf(x, xmin, xmax):
 
     return (loss)
 
+def compute_loss_tf_for_mmBRDeq(a, w, b, a_min, a_max, w_min, w_max):
+    # construct fp32 graph and get result for reference
+    mm = tf.matmul(a, w)
+    mmb = tf.nn.bias_add(mm, b)
+    mmbr = tf.nn.relu(mmb)
+    with tf.compat.v1.Session() as sess:
+        fp32_out = sess.run(mmbr)
+
+    # construct int8 graph with clipped min/max and get the dequnatized result
+    from tensorflow.python.ops.gen_nn_ops import quantized_mat_mul_with_bias_and_relu_and_dequantize
+
+    sess = session.Session()
+    with sess.as_default():
+        q_a, min_input, max_input  = tf.compat.v1.quantize(a, a_min, a_max, tf.quint8, mode='MIN_FIRST')
+        q_w, min_filter, max_filter = tf.compat.v1.quantize(w, w_min, w_max, tf.qint8, mode='SCALED')
+    
+        # compensate bias with B's32 = Q'a * Qw * Bf32 + Q'a * Min(Af32) * 1 *ws8.
+        q_w_e = q_w.eval()
+        QaAmin  = 255 * a_min / (a_max - a_min)
+        abs_max_wt  = np.max(np.abs([w_min, w_max]))
+        bias_scale = 255.0 * 127.0 / ((a_max - a_min) * abs_max_wt)
+        ws8_1 = np.sum(np.array(q_w_e, dtype=np.int32),axis=0,dtype=np.int32)
+        qint32_bias = np.around((b * bias_scale) + (ws8_1*QaAmin))
+        qint32_bias = tf.convert_to_tensor(qint32_bias, dtype = dtypes.qint32)
+
+        # QuantizedmatmulWihBiasAndReluAndDequantize
+        d_mmbr = quantized_mat_mul_with_bias_and_relu_and_dequantize(
+                                    q_a, q_w, qint32_bias, a_min, a_max,
+                                    w_min, w_max,
+                                    Toutput=tf.float32, transpose_a=False, transpose_b=False,
+                                    input_quant_mode="MIN_FIRST")
+    # with tf.compat.v1.Session() as sess:
+        deq_out = d_mmbr.eval() #sess.run(d_mmbr)
+
+    loss = np.square(np.subtract(fp32_out, deq_out)).mean()
+    # print('fp32_out', fp32_out)
+    # print('deq out', deq_out)
+    return loss
+
+    # graph =tf.Graph()
+    # with graph.as_default():
+    #     q_tf, min_tf, max_tf = tf.compat.v1.quantize(x, xmin, xmax, tf.quint8,  mode='MIN_FIRST')
+    #     dq_tf = tf.compat.v1.dequantize(q_tf, min_tf, max_tf, mode='MIN_FIRST')
+
+    #     with tf.compat.v1.Session() as sess:
+    #         dq = sess.run(dq_tf)
+    #         loss = np.square(np.subtract(x, dq)).mean()
+
+
+    # return (loss)
 
 def find_clip_greedy_search(x, bins, r):
     xmin = cur_min = np.min(x)

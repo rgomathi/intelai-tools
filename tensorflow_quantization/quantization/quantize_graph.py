@@ -49,7 +49,11 @@ from tensorflow.python.platform import flags as flags_lib
 from tensorflow.python.platform import gfile
 from google.protobuf import text_format
 from nodes_editor  import  get_nodes_control_pannel 
+
+import KL
+import hist_l2norm as l2norm
 import aciq as ag
+import ocs
 from constants import MSE
 
 flags = flags_lib
@@ -108,7 +112,9 @@ flags.DEFINE_boolean("per_channel", False,
                      "and its fusions.")
 flags.DEFINE_boolean("refine_node", False,
                     "If true, matmul fusion will be refined for accuracy using activation.")
-
+flags.DEFINE_boolean("enable_ocs", False,
+                    "If true, matmul fusion will be refined for accuracy using "
+                    "'outlier channel splitting' method to split the outlier weight.")
 
 def print_input_nodes(current_node, nodes_map, indent, already_visited):
     print(" " * indent + current_node.op + ":" + current_node.name)
@@ -546,7 +552,8 @@ class GraphRewriter(object):
                  excluded_ops=[],
                  excluded_nodes=[],
                  per_channel=False,
-                 refine_node=False):
+                 refine_node=False,
+                 enable_ocs =False):
         """Sets up the class to rewrite a float graph.
 
         Args:
@@ -609,6 +616,7 @@ class GraphRewriter(object):
         # Data that is valid only during the recursive call to rewrite the graph.
         self.state = None
         self.refine_node = refine_node
+        self.enable_ocs = enable_ocs
 
     def create_nodes_map(self, graph):
         """Builds a mapping of node names to their defs from the graph."""
@@ -1175,43 +1183,154 @@ class GraphRewriter(object):
                                                           dequantize_node_name,
                                                           requantize_dtype)
 
+    def calculate_best_range_for_act_wt(self, wt_tensor, bias_tensor):
+        """  Fix min/max of activation and weight using clipping algorithm """
+        
+        act = np.load('../../work_dir/bd/activations.npy')       
+        
+        algo = [
+            # 'kl',
+            #     'hist_apprx', 
+            #     'hist_brute', 
+            #     'aciq',
+            #     'mgs',
+                'mmse'
+        ]
+        loss_dict = {}
+        loss_min = float("inf")
+        
+
+        for clip_method in algo:
+            print('clip method', clip_method)
+            if (clip_method == "kl"):
+                a_max, a_min = KL.get_threshold_asym(act, 1001, 256)        
+                w_max, w_min = KL.get_threshold_sym(wt_tensor, 1001, 256) 
+                
+            elif (clip_method == 'hist_apprx'):
+                hist_apprx_act = l2norm.HistMethods(act, 1001, 256)
+                a_min, a_max = hist_apprx_act.hist_approx()
+                hist_apprx_wt = l2norm.HistMethods(wt_tensor, 1001, 256)
+                w_min, w_max = hist_apprx_wt.hist_approx()                
+               
+            elif (clip_method == 'hist_brute'):
+                hist_brute_act = l2norm.HistMethods(act, 101, 256)
+                a_min, a_max = hist_brute_act.hist_brute()
+                hist_brute_wt = l2norm.HistMethods(wt_tensor, 101, 256)
+                w_min, w_max = hist_brute_wt.hist_brute()
+                
+            elif (clip_method == 'aciq'):
+                a_max = ag.find_clip_aciq(act, 8)
+                w_max = ag.find_clip_aciq(wt_tensor, 8)
+                a_min = -a_max
+                w_min = -w_max
+
+            elif (clip_method == 'mgs'):
+                a_min, a_max = ag.find_clip_greedy_search_1(act, 100, 0.16)
+                w_min, w_max =    ag.find_clip_greedy_search(wt_tensor, 100, 0.16)
+
+            elif (clip_method == "mmse"):
+                a_min, a_max = ag.find_clip_mmse(act, 8)
+                w_min, w_max = ag.find_clip_mmse(wt_tensor, 8)
+
+            act_loss = ag.compute_loss_tf(act, a_min, a_max)
+            wt_loss = MSE(wt_tensor, w_min, w_max)
+            overall_loss = ag.compute_loss_tf_for_mmBRDeq(act, wt_tensor, bias_tensor,
+                                                                    a_min, a_max, w_min, w_max)
+            loss_dict[clip_method] = { 'a_min' : a_min,
+                                        'a_max' : a_max,
+                                        'act_loss' : act_loss,
+                                        'w_min': w_min,
+                                        'w_max': w_max,
+                                        'w_loss' : wt_loss,
+                                        'matmul_loss': overall_loss
+                                    }                                        
+            print('loss_dict', loss_dict)
+
+            if overall_loss < loss_min:
+                print('best clip method', clip_method)
+                a_min_ref, a_max_ref, w_min_ref, w_max_ref = a_min, a_max, w_min, w_max
+        
+        return a_min_ref, a_max_ref, w_min_ref, w_max_ref
+
+
     def intel_cpu_eightbitize_matmul_refine_node(self, original_node, bias_node=None,
-                                          bias_add_name=None, add_node_name=None,
-                                          relu_node_name=None):
+                                          bias_add_name=None, 
+                                          relu_node_name=None,
+                                          enable_ocs=False):
         """Replaces a matmul node with the eight bit equivalent sub-graph."""
         namespace_prefix = original_node.name + "_eightbit"
-        
-
-        # # Use the name of the first input as the control input name
-        # # for reshape_dim and reduction_dim to slove the different frame issue
-        # # in quantized graph
-        # reshape_dims_name, reduction_dims_name = self.add_common_quantization_nodes(
-        #     namespace_prefix, node_name_from_input(original_node.input[0]))
-
-        
-        input_names = []
-        min_max_names = []
-        
         unique_input_name = unique_node_name_from_input(original_node.input[0])
+        act_node = original_node.input[0]
+        act_node_name = node_name_from_input(act_node)
+                
+        # Get the best min/max for activation and weight using 
+        # different clipping algo
+        weight_node_name = original_node.input[1]
+        weight_node = self.nodes_map[weight_node_name]
+        wt_tensor = tensor_util.MakeNdarray(weight_node.attr["value"].tensor) 
+        bias_tensor = tensor_util.MakeNdarray(bias_node.attr["value"].tensor)     
+
+        a_min, a_max, w_min, w_max = self.calculate_best_range_for_act_wt(wt_tensor, bias_tensor)
+
+        if enable_ocs:
+            wt_tensor, in_channels_to_split = ocs.ocs_wts(wt_tensor, 0) #w_scale)
+            print('in_channels_to_split', in_channels_to_split)
+
+            w_min = np.min(wt_tensor)
+            w_max = np.max(wt_tensor)
+            print('w_min', w_min)
+            print('w_max', w_max)
+
+            # add gatherV2 node  to gather activation indices to be duplicated
+            gather_node_name = namespace_prefix + '_gather_' + unique_input_name
+            index_const_name = gather_node_name + "indices"
+            axis_const_name =  "axis"
+            concat_node_name = namespace_prefix + '_concat_' + unique_input_name
+            
+            index_const_node = create_constant_node(
+                index_const_name, in_channels_to_split,
+                dtypes.int32)
+                # shape=shape)
+            
+            axis_node = create_constant_node(axis_const_name, 1, dtypes.int32)
+            gather_input_node = create_node("GatherV2", gather_node_name,
+                            [act_node_name, index_const_name, axis_const_name])
+                
+            set_attr_dtype(gather_input_node, "Taxis", dtypes.int32)
+            set_attr_dtype(gather_input_node, "Tindices", dtypes.int32)
+            set_attr_dtype(gather_input_node, "Tparams", dtypes.float32)
+            set_attr_int(gather_input_node, "batch_dims", 0)
+
+            concat_input_node = create_node("ConcatV2", concat_node_name,
+                            [act_node_name, gather_node_name, axis_const_name])
+
+            set_attr_int(concat_input_node, "N", 2) 
+            set_attr_dtype(concat_input_node, "T", dtypes.float32)
+            set_attr_dtype(concat_input_node, "Tidx", dtypes.int32)
+
+            self.add_output_graph_node(gather_input_node)
+            self.add_output_graph_node(index_const_node)
+            self.add_output_graph_node(axis_node)
+            self.add_output_graph_node(concat_input_node)
+
+
+
+        # add activation quant/min/max nodes to the graph
+
 
         min_input_name = namespace_prefix + "_min_" + unique_input_name
         max_input_name = namespace_prefix + "_max_" + unique_input_name
-        quantize_input_name = namespace_prefix + "_quantize_" + unique_input_name
+        quantize_input_name = namespace_prefix + "_quantize_" + unique_input_name         
+        
 
-        # Fix min/max of activation sample using clipping algorithm
-        act = np.load('../../work_dir/bd/activations.npy')
-       
-        a_min, a_max = ag.find_clip_mmse(act, 8)
         min_node = create_constant_node(min_input_name, a_min, dtypes.float32)
         max_node = create_constant_node(max_input_name, a_max, dtypes.float32)
         
-        act_node = original_node.input[0]
-        print('act_node', act_node)
-        act_node_name = node_name_from_input(act_node)
-        print('act_node_name', act_node_name)
+        
+        # print('act_node_name', act_node_name)
         quantize_input_node = create_node(
             "QuantizeV2", quantize_input_name,
-            [act_node_name, min_input_name, max_input_name])
+            [concat_node_name if enable_ocs else act_node_name, min_input_name, max_input_name])
         set_attr_dtype(quantize_input_node, "T", dtypes.quint8)
         set_attr_string(quantize_input_node, "mode", b"MIN_FIRST")
         set_attr_string(quantize_input_node, "round_mode", b"HALF_AWAY_FROM_ZERO")
@@ -1227,12 +1346,9 @@ class GraphRewriter(object):
         all_input_names = []
         all_input_names.append(quantize_input_name)
 
+        ###################
         # get the min/max from clipping algorithm and use that for weight quantization
-        weight_node_name = original_node.input[1]
-        weight_node = self.nodes_map[weight_node_name]
-        # print('weight_node', weight_node)
-        wt_tensor = tensor_util.MakeNdarray(weight_node.attr["value"].tensor)   
-        w_min, w_max = ag.find_clip_mmse(wt_tensor, 8)
+        ###################      
         
         sess = session.Session()
         with sess.as_default():
@@ -1247,11 +1363,17 @@ class GraphRewriter(object):
         #    min_value = quantize_op[1].eval()
         #    max_value = quantize_op[2].eval()
 
-        print('MSE of activation with a_min {} a_max {} is {}'.format(a_min, a_max, ag.compute_loss_tf(act, a_min, a_max)))
-        print('MSE of weight with w_min {} w_max {} is {}'.format(w_min, w_max, MSE(wt_tensor, w_min, w_max)))
+        
 
         shape = tensor_util.TensorShapeProtoToList(weight_node.attr["value"]
                                                 .tensor.tensor_shape)
+                    
+        # print('shape of wt_tensor ', shape)
+
+        shape[0] = wt_tensor.shape[0]
+        # print('shape of wt_tensor ', shape)
+
+        # print('shape of wt_tensor ', wt_tensor.shape[0])
         base_name = weight_node_name + "_"
         qint8_const_name = base_name + "qint8_const"
         min_name = base_name + "min"
@@ -1265,18 +1387,16 @@ class GraphRewriter(object):
         self.add_output_graph_node(qint8_const_node)
         self.add_output_graph_node(min_node)
         self.add_output_graph_node(max_node)
-        # all_input_names.extend(min_output_name)
-        # all_input_names.extend(max_output_name)
-        
-        # return quantize_input_name, min_output_name, max_output_name
         
         
 
         all_input_names.append(qint8_const_name)
 
+        ###################
         # calculate Bias compensation
+        ###################
         
-        bias_tensor = tensor_util.MakeNdarray(bias_node.attr["value"].tensor)   
+        
         # compensated with B's32 = Q'a * Qw * Bf32 + Q'a * Min(Af32) * 1 *ws8.
         QaAmin  = 255 * a_min / (a_max - a_min)
         abs_max_wt  = np.max(np.abs([w_min, w_max]))
@@ -1546,7 +1666,7 @@ class GraphRewriter(object):
                 bias_node = self.nodes_map[bias_node_name]
                 if self.refine_node:
                     self.intel_cpu_eightbitize_matmul_refine_node(current_node, bias_node, None,
-                                                       None, grand_parent[0].name)
+                                                        grand_parent[0].name, self.enable_ocs)
                 else:
                     self.intel_cpu_eightbitize_matmul_node(current_node, bias_node, None,
                                                        None, grand_parent[0].name)
@@ -2597,7 +2717,8 @@ def main(unused_args):
                              excluded_nodes=excluded_nodes,
                              intel_cpu_eightbitize=FLAGS.intel_cpu_eightbitize,
                              per_channel=FLAGS.per_channel, 
-                             refine_node=FLAGS.refine_node)
+                             refine_node=FLAGS.refine_node,
+                             enable_ocs = FLAGS.enable_ocs)
 
     output_graph = rewriter.rewrite(FLAGS.output_node_names.split(","))
 
